@@ -34,10 +34,4 @@ jobs:
         working-directory: android-sdk
         run: gradle --no-daemon assembleRelease
 
-  ios:
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-      - name: build SDK
-        working-directory: ios-sdk
-        run: swift build
+  # iOS is built on Codemagic (see codemagic.yaml): GitHub's macOS runners queue for too long.

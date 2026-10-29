@@ -2,7 +2,7 @@ workflows:
   ios-sdk:
     name: iOS SDK build
     instance_type: mac_mini_m2
-    max_build_duration: 15
+    max_build_duration: 20
     triggering:
       events:
         - push
@@ -16,3 +16,34 @@ workflows:
         script: |
           cd ios-sdk
           swift build
+      - name: End-to-end test against a local edge node
+        script: |
+          set -e
+          brew install go
+          cd "$CM_BUILD_DIR/edge"
+          go build -o /tmp/edge .
+          go run ./cmd/gencert -host 127.0.0.1 -out /tmp/certs | tee /tmp/gencert.out
+          export GAMEC_TEST_PIN=$(grep '^pin:' /tmp/gencert.out | awk '{print $2}')
+          export GAMEC_TEST_SECRET=test-secret-not-a-real-one
+
+          # fake origin: echoes whatever it receives
+          cat > /tmp/echo.py <<'PY'
+          import socketserver
+          class H(socketserver.BaseRequestHandler):
+              def handle(self):
+                  while True:
+                      d = self.request.recv(4096)
+                      if not d:
+                          break
+                      self.request.sendall(d)
+          class S(socketserver.ThreadingTCPServer):
+              allow_reuse_address = True
+          S(("127.0.0.1", 9000), H).serve_forever()
+          PY
+          python3 /tmp/echo.py &
+          /tmp/edge -listen 127.0.0.1:30800 -origin 127.0.0.1:9000 \
+            -cert /tmp/certs/cert.pem -key /tmp/certs/key.pem -secret "$GAMEC_TEST_SECRET" > /tmp/edge.log 2>&1 &
+          sleep 2
+
+          cd "$CM_BUILD_DIR/ios-sdk"
+          swift test || { echo "--- edge log:"; cat /tmp/edge.log; exit 1; }
