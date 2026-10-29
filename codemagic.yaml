@@ -1,0 +1,18 @@
+workflows:
+  ios-sdk:
+    name: iOS SDK build
+    instance_type: mac_mini_m2
+    max_build_duration: 15
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+    scripts:
+      - name: Swift version
+        script: swift --version
+      - name: Build SDK
+        script: |
+          cd ios-sdk
+          swift build
