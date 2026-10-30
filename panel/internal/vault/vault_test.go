@@ -2,6 +2,7 @@ package vault
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -69,11 +70,20 @@ func TestWrongPassphraseIsRefused(t *testing.T) {
 func TestTamperedFileIsDetected(t *testing.T) {
 	v, p := newVault(t)
 	v.Set("k", "v")
+	// Change one byte of the ciphertext itself (not of its text encoding), so the file stays valid JSON
+	// and what is tested is the authentication check, every time.
 	raw, _ := os.ReadFile(p)
-	i := bytes.Index(raw, []byte(`"ct":"`)) + 8
-	raw[i] ^= 1
-	os.WriteFile(p, raw, 0o600)
-	w, _ := Open(p)
+	var f file
+	if err := json.Unmarshal(raw, &f); err != nil {
+		t.Fatal(err)
+	}
+	f.CT[len(f.CT)/2] ^= 1
+	out, _ := json.Marshal(f)
+	os.WriteFile(p, out, 0o600)
+	w, err := Open(p)
+	if err != nil {
+		t.Fatalf("the tampered file should still open (sealed): %v", err)
+	}
 	if err := w.Unseal(pass); err == nil {
 		t.Fatal("a modified vault must not unseal")
 	}
