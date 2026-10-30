@@ -65,6 +65,12 @@ jobs:
           /tmp/control -listen 127.0.0.1:8099 -nodes /tmp/nodes.json -secret-file /tmp/secret.txt \
             -sign-key /tmp/sign.key > /tmp/control.log 2>&1 &
           export GAMEC_TEST_CONTROL_URL=http://127.0.0.1:8099/v1/session
+          # signed node list served as a fake DoH (the format the real DNS records use)
+          cd ../edge
+          go build -o /tmp/signlist ./cmd/signlist
+          export GAMEC_TEST_LIST_KEY=$(/tmp/signlist -gen-key /tmp/list.key | grep '^public key' | awk '{print $NF}')
+          /tmp/signlist -key /tmp/list.key -nodes /tmp/nodes.json -serve 127.0.0.1:8053 > /tmp/signlist.log 2>&1 &
+          export GAMEC_TEST_DOH_URL=http://127.0.0.1:8053/dns-query
           sleep 2
           cd ../android-sdk
           gradle --no-daemon testDebugUnitTest assembleRelease assembleDebugAndroidTest || { echo "--- edge log:"; cat /tmp/edge.log; echo "--- control log:"; cat /tmp/control.log; exit 1; }

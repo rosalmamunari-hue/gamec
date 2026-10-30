@@ -123,6 +123,38 @@ class ShieldTest {
     }
 
     @Test
+    fun discoveryModeFindsNodesViaDohAndGetsATokenFromTheNode() {
+        val doh = System.getenv("GAMEC_TEST_DOH_URL")
+        val key = System.getenv("GAMEC_TEST_LIST_KEY")
+        assumeTrue("discovery env not set", !doh.isNullOrEmpty() && !key.isNullOrEmpty())
+        val cfg = DiscoveryConfig("_gs.example.com", key!!, "device-android-e2e-0003", dohProviders = listOf(doh!!))
+        val shield = ShieldClient(ShieldConfig(discovery = cfg))
+        val p = shield.start()
+        try {
+            assertEquals("ping", pingVia(p))
+        } finally {
+            shield.stop()
+        }
+    }
+
+    @Test
+    fun discoveryModeRefusesAListSignedByTheWrongKey() {
+        val doh = System.getenv("GAMEC_TEST_DOH_URL")
+        assumeTrue("discovery env not set", !doh.isNullOrEmpty())
+        val other = java.security.KeyPairGenerator.getInstance("EC")
+            .apply { initialize(java.security.spec.ECGenParameterSpec("secp256r1")) }.generateKeyPair()
+        val wrong = java.util.Base64.getEncoder().encodeToString(other.public.encoded)
+        val cfg = DiscoveryConfig("_gs.example.com", wrong, "device-android-e2e-0004", dohProviders = listOf(doh!!))
+        val shield = ShieldClient(ShieldConfig(discovery = cfg))
+        val p = shield.start()
+        try {
+            assertEquals(null, pingVia(p))
+        } finally {
+            shield.stop()
+        }
+    }
+
+    @Test
     fun failoverSkipsDeadNode() {
         val dead = Node(host, 1, pin)
         val shield = ShieldClient(ShieldConfig(listOf(dead, goodNode()), { token(secret) }))

@@ -118,6 +118,10 @@ func handle(c net.Conn, lim *limiter) {
 	if _, err := io.ReadFull(c, buf); err != nil {
 		return
 	}
+	if isTokenRequest(buf) {
+		handleTokenRequest(c, ip, buf)
+		return
+	}
 	if !checkToken(string(buf), time.Now()) {
 		log.Printf("reject %s: bad token", ip)
 		return

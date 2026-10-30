@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class ShieldClient(private val cfg: ShieldConfig) {
     private val selector = NodeSelector(cfg.nodes, cfg.failCooldownMs)
-    private val sessions = cfg.control?.let { SessionManager(it) }
+    private val source = cfg.toSource()
     private val pool = Executors.newCachedThreadPool()
     private val running = AtomicBoolean(false)
     private var server: ServerSocket? = null
@@ -31,7 +31,7 @@ class ShieldClient(private val cfg: ShieldConfig) {
         pool.execute {
             try {
                 while (running.get()) {
-                    sessions?.get()?.let { selector.update(it.nodes) }
+                    source.nodes()?.let { selector.update(it) }
                     selector.probeAll(cfg.connectTimeoutMs)
                     var waited = 0L
                     while (running.get() && waited < cfg.reprobeIntervalMs) {
@@ -66,14 +66,8 @@ class ShieldClient(private val cfg: ShieldConfig) {
 
     /** Tries nodes in order; the first one that completes TLS and takes the token frame wins. */
     private fun openUpstream(): Socket? {
-        val tokenStr = if (sessions != null) {
-            val s = sessions.get() ?: return null
-            selector.update(s.nodes)
-            s.token
-        } else {
-            cfg.tokenProvider!!()
-        }
-        val token = tokenStr.toByteArray()
+        selector.update(source.nodes() ?: return null)
+        val token = (source.token(selector.ordered()) ?: return null).toByteArray()
         for (node in selector.ordered()) {
             try {
                 val s = PinnedTls.connect(node, cfg.connectTimeoutMs)

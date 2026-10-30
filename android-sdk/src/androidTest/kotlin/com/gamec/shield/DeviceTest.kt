@@ -141,6 +141,23 @@ class DeviceTest {
     }
 
     @Test
+    fun discoveryModeWorksOnThisAndroid() {
+        val doh = args.getString("dohUrl") ?: ""
+        val listKey = args.getString("listKey") ?: ""
+        assumeTrue("discovery args not given", doh.isNotEmpty() && listKey.isNotEmpty())
+        val ctx = InstrumentationRegistry.getInstrumentation().targetContext
+        val cfg = DiscoveryConfig("_gs.example.com", listKey, DeviceId.getOrCreate(ctx),
+            dohProviders = listOf(doh), store = PrefsListStore(ctx))
+        val shield = ShieldClient(ShieldConfig(discovery = cfg))
+        val p = shield.start()
+        try {
+            assertEquals("ping", pingVia(p))
+        } finally {
+            shield.stop()
+        }
+    }
+
+    @Test
     fun deviceIdIsStableAndValid() {
         val ctx = InstrumentationRegistry.getInstrumentation().targetContext
         val a = DeviceId.getOrCreate(ctx)

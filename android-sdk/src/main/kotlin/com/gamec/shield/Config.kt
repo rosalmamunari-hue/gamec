@@ -30,14 +30,51 @@ class ControlConfig(
 }
 
 /**
- * Either give a [control] (recommended: tokens and nodes are fetched and kept fresh automatically),
- * or a fixed [nodes] list plus a [tokenProvider] you implement yourself.
+ * Finds the nodes through DNS: a signed list published as TXT records, fetched with DNS-over-HTTPS.
+ * Tokens come from the nodes themselves, so no separate server is needed. Make the list with
+ * `signlist` (see /edge/cmd/signlist) on your own computer; only its PUBLIC key goes in the app.
+ */
+class DiscoveryConfig(
+    /** DNS name holding the TXT records, e.g. "_gs.example.com". */
+    val name: String,
+    /** Base64 X.509 public key printed by `signlist -gen-key`. */
+    val publicKey: String,
+    /** Stable random id for this install; see [DeviceId.getOrCreate]. */
+    val deviceId: String,
+    /** DoH JSON endpoints, tried in order. Add more than one: some are unreachable in some countries. */
+    val dohProviders: List<String> = listOf(Doh.CLOUDFLARE),
+    val timeoutMs: Int = 5000,
+    /** Re-read the records this often. */
+    val refreshSec: Long = 600,
+    /** After a failed lookup wait this long before trying again. */
+    val retrySec: Long = 30,
+    /** Ask for a new token when the current one expires within this many seconds. */
+    val tokenMarginSec: Long = 60,
+    /** Keeps the last good list across restarts, e.g. `PrefsListStore(context)`. */
+    val store: ListStore? = null,
+) {
+    init {
+        require(DEVICE_ID.matches(deviceId)) { "deviceId must be 16-64 chars of A-Z a-z 0-9 _ -" }
+        require(dohProviders.isNotEmpty()) { "at least one DoH provider is required" }
+    }
+
+    private companion object {
+        val DEVICE_ID = Regex("^[A-Za-z0-9_-]{16,64}$")
+    }
+}
+
+/**
+ * Pick one way to learn nodes and tokens:
+ *  - [discovery]: nodes from signed DNS TXT records, tokens from the nodes (no server of your own);
+ *  - [control]: nodes and tokens from your control service;
+ *  - [nodes] + [tokenProvider]: a fixed list and tokens from your own backend.
  */
 class ShieldConfig(
     val nodes: List<Node> = emptyList(),
     /** Returns a fresh token issued by your own backend (the HMAC secret must never ship in the app). */
     val tokenProvider: (() -> String)? = null,
     val control: ControlConfig? = null,
+    val discovery: DiscoveryConfig? = null,
     /** Local port the game connects to instead of the real server. 0 = pick a free port. */
     val localPort: Int = 0,
     val connectTimeoutMs: Int = 3000,
@@ -45,8 +82,8 @@ class ShieldConfig(
     val reprobeIntervalMs: Long = 60_000,
 ) {
     init {
-        require(control != null || (nodes.isNotEmpty() && tokenProvider != null)) {
-            "provide either control, or both nodes and tokenProvider"
+        require(discovery != null || control != null || (nodes.isNotEmpty() && tokenProvider != null)) {
+            "provide discovery, control, or both nodes and tokenProvider"
         }
     }
 }
