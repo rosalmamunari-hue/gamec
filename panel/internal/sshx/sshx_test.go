@@ -3,7 +3,9 @@ package sshx
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
@@ -30,6 +32,7 @@ type server struct {
 	handle     handler
 	execs      atomic.Int32
 	rejected   atomic.Int32
+	lastRemote atomic.Value // where the latest connection came from
 	ln         net.Listener
 }
 
@@ -74,6 +77,7 @@ func startServer(t *testing.T, authorized ssh.PublicKey, h handler) *server {
 }
 
 func (s *server) serve(nc net.Conn, cfg *ssh.ServerConfig) {
+	s.lastRemote.Store(nc.RemoteAddr().String())
 	conn, chans, reqs, err := ssh.NewServerConn(nc, cfg)
 	if err != nil {
 		nc.Close()
@@ -272,5 +276,83 @@ func TestGeneratedKeysRoundTripAndLookRight(t *testing.T) {
 	_, line2, _ := GenerateKey("gamec-panel")
 	if line == line2 {
 		t.Fatal("two generated keys are identical")
+	}
+}
+
+// ---------------------------------------------------------------- a server with several host keys
+
+// startMultiKeyServer presents an ECDSA key as well as an ed25519 one, the way a stock OpenSSH server does.
+func startMultiKeyServer(t *testing.T, authorized ssh.PublicKey, withEd25519 bool) (addr string, ed ssh.Signer, ec ssh.Signer) {
+	t.Helper()
+	ecKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	ec, _ = ssh.NewSignerFromKey(ecKey)
+	ed = newSigner(t)
+	cfg := &ssh.ServerConfig{PublicKeyCallback: func(_ ssh.ConnMetadata, k ssh.PublicKey) (*ssh.Permissions, error) {
+		if bytes.Equal(k.Marshal(), authorized.Marshal()) {
+			return nil, nil
+		}
+		return nil, errors.New("unknown key")
+	}}
+	cfg.AddHostKey(ec) // listed first on purpose: this is the key a naive client would meet first
+	if withEd25519 {
+		cfg.AddHostKey(ed)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			nc, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				conn, chans, reqs, err := ssh.NewServerConn(nc, cfg)
+				if err != nil {
+					nc.Close()
+					return
+				}
+				go ssh.DiscardRequests(reqs)
+				go func() {
+					for range chans {
+					}
+				}()
+				_ = conn
+			}()
+		}
+	}()
+	return ln.Addr().String(), ed, ec
+}
+
+func TestTheEd25519HostKeyIsAlwaysTheOneThatIsFetchedAndPinned(t *testing.T) {
+	k := clientKey(t)
+	addr, ed, ec := startMultiKeyServer(t, k.PublicKey(), true)
+	want, other := ssh.FingerprintSHA256(ed.PublicKey()), ssh.FingerprintSHA256(ec.PublicKey())
+	for i := 0; i < 5; i++ { // not a matter of luck
+		fp, typ, err := FetchHostKey(addr, 3*time.Second)
+		if err != nil || fp != want || typ != "ssh-ed25519" {
+			t.Fatalf("fetched %s (%s) err %v; want the ed25519 key %s, not the ecdsa key %s", fp, typ, err, want, other)
+		}
+	}
+	c, err := Dial(Target{Addr: addr, User: "u", HostKey: want, Signer: k})
+	if err != nil {
+		t.Fatalf("pinning the ed25519 fingerprint must work on a server that also has an ecdsa key: %v", err)
+	}
+	c.Close()
+	if _, err := Dial(Target{Addr: addr, User: "u", HostKey: other, Signer: k}); !errors.Is(err, ErrHostKeyChanged) {
+		t.Fatalf("pinning the ecdsa fingerprint must not be satisfiable: %v", err)
+	}
+}
+
+func TestAServerWithOnlyAWeakerHostKeyIsRefusedClearly(t *testing.T) {
+	k := clientKey(t)
+	addr, _, ec := startMultiKeyServer(t, k.PublicKey(), false)
+	if fp, _, err := FetchHostKey(addr, 3*time.Second); err == nil {
+		t.Fatalf("a server offering only an ecdsa key was accepted (%s)", fp)
+	}
+	if _, err := Dial(Target{Addr: addr, User: "u", HostKey: ssh.FingerprintSHA256(ec.PublicKey()), Signer: k}); err == nil {
+		t.Fatal("the panel must not fall back to another host key type")
 	}
 }

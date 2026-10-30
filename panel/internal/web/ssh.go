@@ -109,8 +109,10 @@ func (s *Server) hostKey(w http.ResponseWriter, r *http.Request, _ *auth.Session
 		return
 	}
 	fetch := s.FetchHostKey
-	if fetch == nil {
-		fetch = sshx.FetchHostKey
+	if fetch == nil { // a node's key is read through the egress host too, or the node would see the panel
+		fetch = func(addr string, to time.Duration) (string, string, error) {
+			return sshx.FetchHostKeyVia(s.nodeDial(), addr, to)
+		}
 	}
 	fp, typ, err := fetch(n.SSHAddr(), 10*time.Second)
 	if err != nil {

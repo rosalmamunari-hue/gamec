@@ -23,12 +23,14 @@ import (
 	"gamec/panel/internal/audit"
 	"gamec/panel/internal/auth"
 	"gamec/panel/internal/dns"
+	"gamec/panel/internal/egress"
 	"gamec/panel/internal/engine"
 	"gamec/panel/internal/ops"
 	"gamec/panel/internal/sshx"
 	"gamec/panel/internal/store"
 	"gamec/panel/internal/vault"
 	"gamec/panel/internal/web"
+	"golang.org/x/crypto/ssh"
 )
 
 const usage = `panel <command> [flags]
@@ -399,7 +401,19 @@ func cmdServe(args []string) error {
 	}
 
 	creds := func(name string) (string, error) { s, _, err := v.Get(name); return s, err }
-	mon := engine.NewMonitor(engine.RealProber{})
+	eg := &egress.Egress{Store: st, Signer: func() (ssh.Signer, error) {
+		pemKey, ok, err := v.Get(web.SSHKeyName)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, errors.New("the panel has no SSH key yet; run `panel ssh-keygen`")
+		}
+		return sshx.ParseSigner(pemKey)
+	}}
+	defer eg.Close()
+	prober := engine.RealProber{Dial: eg.DialContext} // every node-bound connection goes through the egress host when one is set
+	mon := engine.NewMonitor(prober)
 	pub := &engine.Publisher{Vault: v, Store: st, Audit: al, Verifier: engine.DefaultVerifier(),
 		Provider: func(t store.DNSTarget) (dns.Provider, error) {
 			return dns.New(t.Provider, t.CredRef, creds, dns.Options{})
@@ -418,13 +432,13 @@ func cmdServe(args []string) error {
 			if err != nil {
 				return nil, err
 			}
-			c, err := sshx.Dial(sshx.Target{Addr: n.SSHAddr(), User: n.SSHUser, HostKey: n.HostKey, Signer: signer, Timeout: 10 * time.Second})
+			c, err := sshx.Dial(sshx.Target{Addr: n.SSHAddr(), User: n.SSHUser, HostKey: n.HostKey, Signer: signer, Timeout: 10 * time.Second, Dial: eg.DialContext})
 			if err != nil {
 				return nil, err
 			}
 			return c, nil
 		},
-		Probe: func(ctx context.Context, n store.Node) engine.ProbeResult { return engine.RealProber{}.Probe(ctx, n) },
+		Probe: func(ctx context.Context, n store.Node) engine.ProbeResult { return prober.Probe(ctx, n) },
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -434,7 +448,7 @@ func cmdServe(args []string) error {
 
 	srv := &web.Server{Users: users, Sessions: auth.NewSessions(30*time.Minute, 12*time.Hour), Vault: v, Store: st,
 		Audit: al, AuditPath: p.audit, Mon: mon, Pub: pub, Sched: sched, Secure: *secure, TrustProxy: *trustProxy,
-		Ops: nodeOps, ReleaseBase: *releaseBase}
+		Ops: nodeOps, Egress: eg, ReleaseBase: *releaseBase}
 	hs := &http.Server{Addr: *listen, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout: 30 * time.Second, WriteTimeout: 10 * time.Minute, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 16 << 10}
 	go func() {

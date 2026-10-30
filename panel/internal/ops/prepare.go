@@ -69,8 +69,9 @@ chmod 0440 /etc/sudoers.d/gamec-ops.tmp
 visudo -c -f /etc/sudoers.d/gamec-ops.tmp >/dev/null
 mv /etc/sudoers.d/gamec-ops.tmp /etc/sudoers.d/gamec-ops
 
-echo "done. The server's host key, to compare with what the panel shows:"
-for f in /etc/ssh/ssh_host_ed25519_key.pub; do [ -f "$f" ] && ssh-keygen -lf "$f"; done
+echo "done. This server's SSH host keys. The panel uses the ED25519 one; compare it with what the panel shows:"
+for f in /etc/ssh/ssh_host_*_key.pub; do [ -f "$f" ] && ssh-keygen -lf "$f"; done
+[ -f /etc/ssh/ssh_host_ed25519_key.pub ] || echo "WARNING: this server has no ED25519 host key; the panel cannot connect until one exists (ssh-keygen -A)" >&2
 `, opts, pubLine, nodectlURL, nodectlSHA), nil
 }
 

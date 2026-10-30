@@ -1,8 +1,12 @@
 // Package shieldclient speaks the edge node's protocol from Go: pinned TLS 1.3, the token frame, and the
 // GET-TOKEN request. It is what the control panel uses to check nodes; the apps implement the same protocol.
+//
+// Every function has a "Via" form that takes the function used to open the TCP connection, so a caller can
+// send everything through a proxy or an SSH jump host and the node sees that address instead of its own.
 package shieldclient
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -13,13 +17,20 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync/atomic"
 	"time"
 )
 
-// Dial opens a TLS 1.3 connection and accepts only the certificate whose public key matches pin.
-func Dial(addr, pin string, timeout time.Duration) (*tls.Conn, time.Duration, error) {
-	t0 := time.Now()
-	c, err := tls.DialWithDialer(&net.Dialer{Timeout: timeout}, "tcp", addr, &tls.Config{
+// DialFunc opens a TCP connection. Nothing in this package opens one any other way.
+type DialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
+
+// DirectDial connects from this machine.
+func DirectDial(ctx context.Context, network, addr string) (net.Conn, error) {
+	return (&net.Dialer{}).DialContext(ctx, network, addr)
+}
+
+func pinned(pin string) *tls.Config {
+	return &tls.Config{
 		MinVersion:         tls.VersionTLS13,
 		InsecureSkipVerify: true, // trust is decided by the pin below, not by a CA
 		VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error {
@@ -40,11 +51,30 @@ func Dial(addr, pin string, timeout time.Duration) (*tls.Conn, time.Duration, er
 			}
 			return nil
 		},
-	})
+	}
+}
+
+// DialVia opens a TLS 1.3 connection over `dial` and accepts only the certificate whose public key matches pin.
+// The returned duration covers the whole setup (connecting and the TLS handshake).
+func DialVia(dial DialFunc, addr, pin string, timeout time.Duration) (*tls.Conn, time.Duration, error) {
+	t0 := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	raw, err := dial(ctx, "tcp", addr)
 	if err != nil {
 		return nil, 0, err
 	}
+	c := tls.Client(raw, pinned(pin))
+	if err := c.HandshakeContext(ctx); err != nil {
+		raw.Close()
+		return nil, 0, err
+	}
 	return c, time.Since(t0), nil
+}
+
+// Dial is DialVia from this machine.
+func Dial(addr, pin string, timeout time.Duration) (*tls.Conn, time.Duration, error) {
+	return DialVia(DirectDial, addr, pin, timeout)
 }
 
 func writeFrame(c net.Conn, body []byte) error {
@@ -54,8 +84,32 @@ func writeFrame(c net.Conn, body []byte) error {
 	return err
 }
 
+// expire closes c after d unless stop is called first, and says whether it fired. Connections that come
+// through an SSH jump host ignore deadlines, so a read that must not wait forever needs this as well.
+func expire(c net.Conn, d time.Duration) (stop func(), fired func() bool) {
+	var f atomic.Bool
+	t := time.AfterFunc(d, func() { f.Store(true); c.Close() })
+	return func() { t.Stop() }, f.Load
+}
+
+type timeoutErr struct{}
+
+func (timeoutErr) Error() string   { return "i/o timeout" }
+func (timeoutErr) Timeout() bool   { return true }
+func (timeoutErr) Temporary() bool { return true }
+
 func readFrame(c net.Conn, timeout time.Duration) ([]byte, error) {
 	c.SetReadDeadline(time.Now().Add(timeout))
+	stop, fired := expire(c, timeout+time.Second)
+	defer stop()
+	b, err := readFrameInner(c)
+	if err != nil && fired() {
+		err = timeoutErr{}
+	}
+	return b, err
+}
+
+func readFrameInner(c net.Conn) ([]byte, error) {
 	var h [2]byte
 	if _, err := io.ReadFull(c, h[:]); err != nil {
 		return nil, err
@@ -69,9 +123,9 @@ func readFrame(c net.Conn, timeout time.Duration) ([]byte, error) {
 	return body, err
 }
 
-// RequestToken asks the node for a token: one connection, "GET-TOKEN <device id>", one JSON frame back.
-func RequestToken(addr, pin, deviceID string, timeout time.Duration) (token string, expiresAt int64, err error) {
-	c, _, err := Dial(addr, pin, timeout)
+// RequestTokenVia asks the node for a token: one connection, "GET-TOKEN <device id>", one JSON frame back.
+func RequestTokenVia(dial DialFunc, addr, pin, deviceID string, timeout time.Duration) (token string, expiresAt int64, err error) {
+	c, _, err := DialVia(dial, addr, pin, timeout)
 	if err != nil {
 		return "", 0, err
 	}
@@ -94,11 +148,15 @@ func RequestToken(addr, pin, deviceID string, timeout time.Duration) (token stri
 	return r.Token, r.ExpiresAt, nil
 }
 
-// OriginReachable opens a relay with the token and reports whether the node keeps it open for `hold`.
+func RequestToken(addr, pin, deviceID string, timeout time.Duration) (string, int64, error) {
+	return RequestTokenVia(DirectDial, addr, pin, deviceID, timeout)
+}
+
+// OriginReachableVia opens a relay with the token and reports whether the node keeps it open for `hold`.
 // A node closes the connection at once if the token is wrong or it cannot reach the origin, so a connection
 // that stays open means the whole path through the node works.
-func OriginReachable(addr, pin, token string, hold time.Duration, timeout time.Duration) (bool, error) {
-	c, _, err := Dial(addr, pin, timeout)
+func OriginReachableVia(dial DialFunc, addr, pin, token string, hold, timeout time.Duration) (bool, error) {
+	c, _, err := DialVia(dial, addr, pin, timeout)
 	if err != nil {
 		return false, err
 	}
@@ -107,7 +165,12 @@ func OriginReachable(addr, pin, token string, hold time.Duration, timeout time.D
 		return false, err
 	}
 	c.SetReadDeadline(time.Now().Add(hold))
+	stop, fired := expire(c, hold+500*time.Millisecond)
+	defer stop()
 	_, err = c.Read(make([]byte, 1))
+	if err != nil && fired() {
+		return true, nil
+	}
 	if ne, ok := err.(net.Error); ok && ne.Timeout() {
 		return true, nil // nothing arrived and nothing closed: the relay is open
 	}
@@ -115,4 +178,8 @@ func OriginReachable(addr, pin, token string, hold time.Duration, timeout time.D
 		return true, nil // the origin sent something
 	}
 	return false, fmt.Errorf("node closed the relay: %w", err)
+}
+
+func OriginReachable(addr, pin, token string, hold, timeout time.Duration) (bool, error) {
+	return OriginReachableVia(DirectDial, addr, pin, token, hold, timeout)
 }

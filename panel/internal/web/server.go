@@ -22,6 +22,7 @@ import (
 	"gamec/edge/shieldlist"
 	"gamec/panel/internal/audit"
 	"gamec/panel/internal/auth"
+	"gamec/panel/internal/egress"
 	"gamec/panel/internal/engine"
 	"gamec/panel/internal/ops"
 	"gamec/panel/internal/store"
@@ -48,6 +49,10 @@ type Server struct {
 	Releases     *ops.Releases
 	ReleaseBase  string // like https://github.com/OWNER/REPO/releases/download
 	FetchHostKey func(addr string, timeout time.Duration) (fingerprint, keyType string, err error)
+	// FetchJumpKey reads the egress host's key (always directly); nil means sshx.FetchHostKey.
+	FetchJumpKey func(addr string, timeout time.Duration) (fingerprint, keyType string, err error)
+	// Egress sends connections to nodes through a jump host; nil means they are made directly.
+	Egress *egress.Egress
 
 	// Secure marks cookies Secure and sends HSTS: set it whenever the panel is served over HTTPS.
 	Secure bool
@@ -292,6 +297,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /unseal", s.need(true, s.unsealSubmit))
 	mux.HandleFunc("GET /audit", s.need(false, s.auditPage))
 	s.routesSSH(mux)
+	s.routesEgress(mux)
 	return s.headers(mux)
 }
 

@@ -1,0 +1,69 @@
+{{template "head" .}}
+{{$p := .}}
+<section class="card">
+  <p class="muted">Every connection the panel makes to a node (SSH, status checks, host keys) can be sent through one jump host, so the nodes see <b>its</b> address and never the panel's. It uses SSH forwarding: nothing extra to install on the jump host, and its account cannot open a shell or run a command. If the jump host cannot be used, connections <b>fail</b>; they never quietly go direct.</p>
+</section>
+
+<section class="card">
+  <h2>Egress host</h2>
+  {{if .Data.Cfg}}
+    <p><code>{{.Data.Cfg.User}}@{{.Data.Cfg.Addr}}</code></p>
+    {{if .Data.Cfg.HostKey}}<p>Host key confirmed: <code class="wrap">{{.Data.Cfg.HostKey}}</code></p>
+    {{else}}<p class="alert">Host key not confirmed: nothing is sent to any node until it is.</p>{{end}}
+  {{else}}
+    <p class="muted">Not configured: the panel connects to the nodes directly, so they see the panel's own address.</p>
+  {{end}}
+  <form method="post" action="/egress/set" class="stack">
+    <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+    <label>Address (host or host:port, SSH port defaults to 22) <input name="addr" value="{{if .Data.Cfg}}{{.Data.Cfg.Addr}}{{end}}" required></label>
+    <label>Account <input name="user" value="{{if .Data.Cfg}}{{.Data.Cfg.User}}{{else}}gamec-jump{{end}}" required></label>
+    <button>Save</button>
+  </form>
+  {{if .Data.Cfg}}
+  <form method="post" action="/egress/remove" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button class="danger">Remove (connect directly again)</button></form>
+  {{end}}
+</section>
+
+{{if .Data.Cfg}}
+<section class="card">
+  <h2>Host key</h2>
+  {{if .Data.Fingerprint}}
+    {{if .Data.KeyChanged}}<p class="alert"><b>Different from the key you confirmed before.</b> Either the machine was reinstalled or someone is intercepting the connection.</p>{{end}}
+    <p>The host presents (<code>{{.Data.KeyType}}</code>): <code class="wrap">{{.Data.Fingerprint}}</code></p>
+    <p class="muted">Compare it with the ED25519 line printed when you ran the script on that machine. Confirm only if they are the same.</p>
+    <form method="post" action="/egress/hostkey" class="inline">
+      <input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="action" value="trust"><input type="hidden" name="fingerprint" value="{{.Data.Fingerprint}}">
+      <button class="primary">They match: trust this key</button>
+    </form>
+  {{else}}
+    <form method="post" action="/egress/hostkey" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="action" value="fetch"><button>{{if .Data.Cfg.HostKey}}Check the key again{{else}}Fetch the host's key{{end}}</button></form>
+  {{end}}
+</section>
+
+<section class="card">
+  <h2>Prepare the jump host</h2>
+  {{if .Data.HasKey}}
+  <p>Generates a script to read and run <b>once, as root</b>, on the jump host. It creates the account and allows the panel's key to forward connections <b>only</b> to the addresses of your nodes (the service port and, where SSH is set up, the SSH port). Run it again whenever you add a node.</p>
+  <form method="post" action="/egress/script" class="stack">
+    <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+    <label>Only allow logins from this address (the panel's own address; recommended) <input name="from" placeholder="203.0.113.9"></label>
+    <button class="primary">Generate the script</button>
+  </form>
+  {{if .Data.Script}}<pre>{{.Data.Script}}</pre>
+  <p class="muted">On every node, allow SSH and the service port only from the <b>jump host's</b> address (and put that address, not the panel's, in the node's <code>from=</code>).</p>{{end}}
+  {{else}}<p class="alert">The panel has no SSH key yet. Create one with <code>panel ssh-keygen</code>.</p>{{end}}
+</section>
+
+<section class="card">
+  <h2>Test</h2>
+  <p class="muted">Opens a connection to every node's service port through the jump host.</p>
+  <form method="post" action="/egress/test" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button>Test every node through the egress host</button></form>
+  {{if .Data.Tests}}
+  <table>
+    <tr><th>Node</th><th>Address</th><th>Result</th><th>Time</th></tr>
+    {{range .Data.Tests}}<tr class="{{if .OK}}ok{{else}}fail{{end}}"><td>{{.Node}}</td><td><code>{{.Addr}}</code></td><td><span class="dot"></span> {{if .OK}}reachable{{else}}{{.Err}}{{end}}</td><td>{{.Took}}</td></tr>{{end}}
+  </table>
+  {{end}}
+</section>
+{{end}}
+{{template "foot" .}}

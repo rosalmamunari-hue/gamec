@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -26,8 +27,18 @@ var (
 	ErrHostKeyChanged = errors.New("the server's host key differs from the confirmed one: it was reinstalled, or the connection is being intercepted")
 )
 
+// hostKeyAlgos is the only host key type the panel accepts. A server usually has several host keys (ed25519,
+// ecdsa, rsa) and the client's own preference decides which one it presents; leaving that open makes the
+// fingerprint an administrator compares depend on the library's ordering. Fixing the type makes it the
+// ed25519 key, which is the one the prepare script prints, and stops anyone steering the connection to a
+// weaker key type.
+var hostKeyAlgos = []string{ssh.KeyAlgoED25519}
+
 // MaxOutput bounds what Run keeps of a command's output (each of stdout and stderr).
 const MaxOutput = 1 << 20
+
+// DialFunc opens a TCP connection. Pass one to send everything through a jump host or proxy.
+type DialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
 
 type Target struct {
 	Addr    string // host:port
@@ -35,6 +46,16 @@ type Target struct {
 	HostKey string // SHA256 fingerprint as printed by ssh-keygen -l, e.g. "SHA256:abc..."
 	Signer  ssh.Signer
 	Timeout time.Duration
+	// Dial, if set, makes the TCP connection to Addr. Nothing here ever connects any other way, so with a
+	// jump host's Dial the server sees the jump host's address and never this machine's.
+	Dial DialFunc
+}
+
+func (t Target) connect(ctx context.Context) (net.Conn, error) {
+	if t.Dial != nil {
+		return t.Dial(ctx, "tcp", t.Addr)
+	}
+	return (&net.Dialer{}).DialContext(ctx, "tcp", t.Addr)
 }
 
 // GenerateKey makes an ed25519 key pair: the private key in OpenSSH PEM form (kept in the vault) and the
@@ -76,6 +97,11 @@ func timeout(t time.Duration) time.Duration {
 // administrator can compare it with the one on the server (ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub)
 // before confirming it. Nothing is sent to the server.
 func FetchHostKey(addr string, to time.Duration) (fingerprint, keyType string, err error) {
+	return FetchHostKeyVia(nil, addr, to)
+}
+
+// FetchHostKeyVia is FetchHostKey with the TCP connection made by dial (nil = from this machine).
+func FetchHostKeyVia(dial DialFunc, addr string, to time.Duration) (fingerprint, keyType string, err error) {
 	var got ssh.PublicKey
 	cfg := &ssh.ClientConfig{
 		User: "gamec-probe",
@@ -83,9 +109,20 @@ func FetchHostKey(addr string, to time.Duration) (fingerprint, keyType string, e
 			got = key
 			return errors.New("host key captured") // stop right after the key exchange
 		},
-		Timeout: timeout(to),
+		HostKeyAlgorithms: hostKeyAlgos,
 	}
-	_, err = ssh.Dial("tcp", addr, cfg)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout(to))
+	defer cancel()
+	nc, derr := Target{Addr: addr, Dial: dial}.connect(ctx)
+	if derr != nil {
+		return "", "", derr
+	}
+	defer nc.Close()
+	nc.SetDeadline(time.Now().Add(timeout(to)))
+	cc, _, _, err := ssh.NewClientConn(nc, addr, cfg)
+	if cc != nil {
+		cc.Close()
+	}
 	if got == nil {
 		if err == nil {
 			err = errors.New("no host key was presented")
@@ -105,10 +142,11 @@ func Dial(t Target) (*Conn, error) {
 		return nil, ErrHostKeyUnknown
 	}
 	cfg := &ssh.ClientConfig{
-		User:          t.User,
-		Auth:          []ssh.AuthMethod{ssh.PublicKeys(t.Signer)},
-		Timeout:       timeout(t.Timeout),
-		ClientVersion: "SSH-2.0-gamec-panel",
+		User:              t.User,
+		Auth:              []ssh.AuthMethod{ssh.PublicKeys(t.Signer)},
+		Timeout:           timeout(t.Timeout),
+		HostKeyAlgorithms: hostKeyAlgos,
+		ClientVersion:     "SSH-2.0-gamec-panel",
 		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
 			if ssh.FingerprintSHA256(key) != t.HostKey {
 				return fmt.Errorf("%w (confirmed %s, server presented %s)", ErrHostKeyChanged, t.HostKey, ssh.FingerprintSHA256(key))
@@ -116,14 +154,123 @@ func Dial(t Target) (*Conn, error) {
 			return nil
 		},
 	}
-	c, err := ssh.Dial("tcp", t.Addr, cfg)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout(t.Timeout))
+	defer cancel()
+	nc, err := t.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return &Conn{c: c}, nil
+	nc.SetDeadline(time.Now().Add(timeout(t.Timeout))) // for the handshake and login
+	cc, chans, reqs, err := ssh.NewClientConn(nc, t.Addr, cfg)
+	if err != nil {
+		nc.Close()
+		return nil, err
+	}
+	nc.SetDeadline(time.Time{})
+	return &Conn{c: ssh.NewClient(cc, chans, reqs)}, nil
 }
 
 func (c *Conn) Close() error { return c.c.Close() }
+
+// DialContext opens a TCP connection from the far side of this SSH connection (a "direct-tcpip" channel),
+// so the destination sees this server's address. The server decides what it allows (see permitopen).
+func (c *Conn) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	type res struct {
+		c   net.Conn
+		err error
+	}
+	ch := make(chan res, 1)
+	go func() {
+		conn, err := c.c.Dial(network, addr)
+		ch <- res{conn, err}
+	}()
+	select {
+	case r := <-ch:
+		return r.c, r.err
+	case <-ctx.Done():
+		go func() { // a connection that arrives after we gave up must not leak
+			if r := <-ch; r.c != nil {
+				r.c.Close()
+			}
+		}()
+		return nil, ctx.Err()
+	}
+}
+
+// Alive reports whether the SSH connection is still usable.
+func (c *Conn) Alive() bool {
+	_, _, err := c.c.SendRequest("keepalive@openssh.com", true, nil)
+	return err == nil
+}
+
+// Jump keeps one logged-in connection to a jump host and dials through it, logging in again if the
+// connection has gone away. It never falls back to connecting directly: if the jump host cannot be reached
+// the dial fails, because a quiet fallback would show this machine's address to the destination.
+type Jump struct {
+	t  Target
+	mu sync.Mutex
+	c  *Conn
+}
+
+func NewJump(t Target) *Jump { return &Jump{t: t} }
+
+func (j *Jump) conn() (*Conn, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.c != nil {
+		return j.c, nil
+	}
+	c, err := Dial(j.t)
+	if err != nil {
+		return nil, fmt.Errorf("the egress host %s: %w", j.t.Addr, err)
+	}
+	j.c = c
+	return c, nil
+}
+
+func (j *Jump) reset(old *Conn) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.c == old && old != nil {
+		old.Close()
+		j.c = nil
+	}
+}
+
+// DialContext satisfies DialFunc.
+func (j *Jump) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	var last error
+	for attempt := 0; attempt < 2; attempt++ {
+		c, err := j.conn()
+		if err != nil {
+			return nil, err
+		}
+		conn, err := c.DialContext(ctx, network, addr)
+		if err == nil {
+			return conn, nil
+		}
+		var oe *ssh.OpenChannelError
+		if errors.As(err, &oe) {
+			// The jump host answered and said no (the destination is not allowed, or it refused the
+			// connection). Logging in again would not change that.
+			return nil, fmt.Errorf("via the egress host %s: %w", j.t.Addr, err)
+		}
+		last = err
+		j.reset(c) // the connection itself is broken: log in again and retry once
+	}
+	return nil, fmt.Errorf("via the egress host %s: %w", j.t.Addr, last)
+}
+
+func (j *Jump) Close() error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.c != nil {
+		err := j.c.Close()
+		j.c = nil
+		return err
+	}
+	return nil
+}
 
 type Result struct {
 	Stdout    string

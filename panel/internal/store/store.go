@@ -16,6 +16,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -109,9 +110,18 @@ func (n *Node) SSHConfigured() bool { return n.SSHUser != "" }
 // Key identifies what a client would connect to; it is what changes when the published list must change.
 func (n *Node) Key() string { return n.Addr() + ":" + n.Pin }
 
+// Egress is the jump host every connection from the panel to a node is sent through, so the nodes see its
+// address and never the panel's.
+type Egress struct {
+	Addr    string `json:"addr"` // host:port of its SSH service
+	User    string `json:"user"`
+	HostKey string `json:"host_key"` // confirmed SHA256 fingerprint; empty means not confirmed yet
+}
+
 type State struct {
 	Clusters []*Cluster `json:"clusters"`
 	Nodes    []*Node    `json:"nodes"`
+	Egress   *Egress    `json:"egress,omitempty"`
 }
 
 func (s State) Cluster(id string) *Cluster {
@@ -221,6 +231,19 @@ func (s State) Validate() error {
 			if t.Provider != "manual" && !credRefRe.MatchString(t.CredRef) {
 				return fmt.Errorf("cluster %q: credential reference %q is not valid", c.Name, t.CredRef)
 			}
+		}
+	}
+	if e := s.Egress; e != nil {
+		host, port, err := net.SplitHostPort(e.Addr)
+		p, perr := strconv.Atoi(port)
+		if err != nil || perr != nil || p < 1 || p > 65535 || !validHost(host) {
+			return fmt.Errorf("the egress address %q is not host:port", e.Addr)
+		}
+		if !userRe.MatchString(e.User) {
+			return fmt.Errorf("%q is not a valid egress account name", e.User)
+		}
+		if e.HostKey != "" && !hostKeyRe.MatchString(e.HostKey) {
+			return errors.New("the egress host key fingerprint is not valid")
 		}
 	}
 	nodeIDs := map[string]bool{}

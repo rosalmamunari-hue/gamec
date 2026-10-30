@@ -4,6 +4,9 @@ package engine
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	mrand "math/rand"
 	"sync"
 	"time"
 
@@ -24,11 +27,25 @@ type Prober interface {
 	Probe(ctx context.Context, n store.Node) ProbeResult
 }
 
+// ProbeID is the device id a probe presents: 32 random hex characters, the same shape as the ids the apps
+// generate, new every time. A probe therefore does not look like one fixed, recognisable client.
+func ProbeID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		panic("no secure random source: " + err.Error())
+	}
+	return hex.EncodeToString(b)
+}
+
 // RealProber checks a node the way a player's phone would: pinned TLS, ask for a token, open a relay and
 // see that the node keeps it open (it closes at once if it cannot reach the origin).
+//
+// Dial opens every TCP connection. Set it to send probes through the egress jump host; if it is nil the
+// connections are made from this machine.
 type RealProber struct {
 	Timeout time.Duration
 	Hold    time.Duration
+	Dial    shieldclient.DialFunc
 }
 
 func (p RealProber) Probe(ctx context.Context, n store.Node) ProbeResult {
@@ -41,7 +58,11 @@ func (p RealProber) Probe(ctx context.Context, n store.Node) ProbeResult {
 		hold = time.Second
 	}
 	addr := n.Addr()
-	c, hs, err := shieldclient.Dial(addr, n.Pin, timeout)
+	dial := p.Dial
+	if dial == nil {
+		dial = shieldclient.DirectDial
+	}
+	c, hs, err := shieldclient.DialVia(dial, addr, n.Pin, timeout)
 	if err != nil {
 		r.Err = "connect: " + err.Error()
 		return r
@@ -52,13 +73,13 @@ func (p RealProber) Probe(ctx context.Context, n store.Node) ProbeResult {
 		r.Err = "cancelled"
 		return r
 	}
-	tok, _, err := shieldclient.RequestToken(addr, n.Pin, "panel-"+n.ID+"-probe-check", timeout)
+	tok, _, err := shieldclient.RequestTokenVia(dial, addr, n.Pin, ProbeID(), timeout)
 	if err != nil {
 		r.Err = "token: " + err.Error()
 		return r
 	}
 	r.TokenOK = true
-	ok, err := shieldclient.OriginReachable(addr, n.Pin, tok, hold, timeout)
+	ok, err := shieldclient.OriginReachableVia(dial, addr, n.Pin, tok, hold, timeout)
 	if err != nil || !ok {
 		if err != nil {
 			r.Err = "origin: " + err.Error()
@@ -88,13 +109,19 @@ type Monitor struct {
 	FailToEject int
 	OKToAdmit   int
 
+	// Jitter is the fraction by which each probing round's interval varies at random (0.2 = plus or minus
+	// 20 %), and the nodes of one round are probed at random moments within the first half of the interval.
+	// A probe that fires on the second, at every node at once, is easy to recognise as a monitor.
+	Jitter float64
+
 	mu     sync.Mutex
 	health map[string]*Health
 	prober Prober
+	rnd    func() float64
 }
 
 func NewMonitor(p Prober) *Monitor {
-	return &Monitor{FailToEject: 5, OKToAdmit: 5, health: map[string]*Health{}, prober: p}
+	return &Monitor{FailToEject: 5, OKToAdmit: 5, Jitter: 0.2, health: map[string]*Health{}, prober: p, rnd: mrand.Float64}
 }
 
 func (m *Monitor) Record(id string, r ProbeResult) {
@@ -144,29 +171,54 @@ func (m *Monitor) Forget(id string) {
 	delete(m.health, id)
 }
 
-// ProbeAll probes the given nodes in parallel once.
+// ProbeAll probes the given nodes in parallel, at once (used for "probe now").
 func (m *Monitor) ProbeAll(ctx context.Context, nodes []*store.Node) {
+	m.probeSpread(ctx, nodes, 0)
+}
+
+// jittered varies d by up to +-frac; r is a number in [0,1).
+func jittered(d time.Duration, frac, r float64) time.Duration {
+	if frac <= 0 {
+		return d
+	}
+	return time.Duration(float64(d) * (1 + frac*(2*r-1)))
+}
+
+// probeSpread probes every node once, each after its own random delay of up to maxDelay.
+func (m *Monitor) probeSpread(ctx context.Context, nodes []*store.Node, maxDelay time.Duration) {
 	var wg sync.WaitGroup
 	for _, n := range nodes {
+		wait := time.Duration(m.rnd() * float64(maxDelay))
 		wg.Add(1)
-		go func(n store.Node) {
+		go func(n store.Node, wait time.Duration) {
 			defer wg.Done()
+			if wait > 0 {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(wait):
+				}
+			}
 			m.Record(n.ID, m.prober.Probe(ctx, n))
-		}(*n)
+		}(*n, wait)
 	}
 	wg.Wait()
 }
 
-// Run probes every interval until ctx ends. nodesFn is asked each round, so changes are picked up.
+// Run probes in rounds until ctx ends. nodesFn is asked each round, so changes are picked up.
 func (m *Monitor) Run(ctx context.Context, nodesFn func() []*store.Node, interval time.Duration) {
-	t := time.NewTicker(interval)
-	defer t.Stop()
 	for {
-		m.ProbeAll(ctx, nodesFn())
+		start := time.Now()
+		next := start.Add(jittered(interval, m.Jitter, m.rnd()))
+		spread := time.Duration(0)
+		if m.Jitter > 0 {
+			spread = interval / 2
+		}
+		m.probeSpread(ctx, nodesFn(), spread)
 		select {
 		case <-ctx.Done():
 			return
-		case <-t.C:
+		case <-time.After(time.Until(next)):
 		}
 	}
 }

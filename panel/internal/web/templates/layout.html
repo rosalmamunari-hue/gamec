@@ -12,7 +12,7 @@
   {{if .User}}
   <nav>
     <a href="/">Clusters</a>
-    {{if .Admin}}<a href="/secrets">DNS credentials</a><a href="/ssh">SSH management</a>{{end}}
+    {{if .Admin}}<a href="/secrets">DNS credentials</a><a href="/ssh">SSH management</a><a href="/egress">Egress</a>{{end}}
     <a href="/audit">Audit log</a>
     <form method="post" action="/logout" class="inline">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
