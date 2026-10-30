@@ -69,7 +69,7 @@ class DiscoveryConfig(
      * When no node can be reached the list is re-read at once instead of waiting for [refreshSec], but not
      * more often than this many seconds.
      */
-    val urgentRefreshSec: Long = 30,
+    val urgentRefreshSec: Long = 3,
     /** Keeps the last good list across restarts, e.g. `PrefsListStore(context)`. */
     val store: ListStore? = null,
 ) {

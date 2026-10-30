@@ -175,7 +175,7 @@ final class DiscoveryTests: XCTestCase {
         XCTAssertNil(NodeDirectory(cfg: c, queryTxt: { _ in [] }, clock: { 1000 }).get())
     }
 
-    func testRefreshNowReadsAtOnceButNotMoreOftenThanEveryThirtySeconds() throws {
+    func testRefreshNowReadsAtOnceButNotMoreOftenThanEveryThreeSeconds() throws {
         let k = P256.Signing.PrivateKey()
         var now: Int64 = 1000
         var queries = 0
@@ -186,13 +186,13 @@ final class DiscoveryTests: XCTestCase {
         }, clock: { now })
         _ = d.get()
         XCTAssertEqual(queries, 1)
-        now = 1029; iat = 950
+        now = 1001; iat = 950
         _ = d.refreshNow()
         XCTAssertEqual(queries, 1)
-        now = 1030
+        now = 1003
         XCTAssertEqual(d.refreshNow()?.iat, 950)
         XCTAssertEqual(queries, 2)
-        now = 1059
+        now = 1004
         _ = d.refreshNow()
         XCTAssertEqual(queries, 2)
     }
@@ -205,7 +205,7 @@ final class DiscoveryTests: XCTestCase {
         let d = NodeDirectory(cfg: try cfg(k), queryTxt: { _ in down ? [] : good }, clock: { now })
         _ = d.get()
         down = true
-        now = 1040
+        now = 1010
         XCTAssertEqual(d.refreshNow()?.nodes.count, 2)
     }
 
