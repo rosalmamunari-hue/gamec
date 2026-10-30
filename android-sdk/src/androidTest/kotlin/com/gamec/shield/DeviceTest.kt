@@ -131,7 +131,7 @@ class DeviceTest {
         val other = java.security.KeyPairGenerator.getInstance("EC")
             .apply { initialize(java.security.spec.ECGenParameterSpec("secp256r1")) }.generateKeyPair()
         val wrong = java.util.Base64.getEncoder().encodeToString(other.public.encoded)
-        val shield = ShieldClient(ShieldConfig(control = ControlConfig(controlUrl, wrong, "device-wrong-key-0000001")))
+        val shield = ShieldClient(ShieldConfig(control = ControlConfig(controlUrl, wrong, "device-wrong-key-0000001"), connectRetryWindowMs = 0))
         val p = shield.start()
         try {
             assertNull(pingVia(p))
