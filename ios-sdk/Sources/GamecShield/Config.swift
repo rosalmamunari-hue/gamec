@@ -92,7 +92,7 @@ public struct DiscoveryConfig {
                 resolverStagger: TimeInterval = 0.2,
                 timeout: TimeInterval = 5, refreshInterval: TimeInterval = 600,
                 retryInterval: TimeInterval = 30, tokenMargin: TimeInterval = 60,
-                urgentRefresh: TimeInterval = 3,
+                urgentRefresh: TimeInterval = 30,
                 store: ListStore? = nil) throws {
         guard isValidDeviceId(deviceId) else { throw ShieldError.invalidDeviceId }
         guard !(dohProviders.isEmpty && dotServers.isEmpty) else { throw ShieldError.emptyNodeList }

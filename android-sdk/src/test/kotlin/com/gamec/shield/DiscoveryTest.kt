@@ -201,7 +201,7 @@ class DiscoveryTest {
     }
 
     @Test
-    fun refreshNowReadsAtOnceEvenWhenTheListIsFreshButNotMoreOftenThanEveryThreeSeconds() {
+    fun refreshNowReadsAtOnceEvenWhenTheListIsFreshButNotMoreOftenThanEveryThirtySeconds() {
         val k = newKey()
         var now = 1000L
         var queries = 0
@@ -209,15 +209,15 @@ class DiscoveryTest {
         val d = NodeDirectory(cfg(k, refreshSec = 600), { queries++; records(k, nodes(2), iat = iat, exp = 99_999) }, { now })
         d.get()
         assertEquals(1, queries)
-        now = 1001
+        now = 1029
         iat = 950
-        d.refreshNow()                  // 1 s after the last read: too soon
+        d.refreshNow()                  // 29 s after the last read: too soon
         assertEquals(1, queries)
-        now = 1003
-        val fresh = d.refreshNow()      // 3 s: reads again although the list is far from its 600 s refresh
+        now = 1030
+        val fresh = d.refreshNow()      // 30 s: reads again although the list is far from its 600 s refresh
         assertEquals(2, queries)
         assertEquals(950L, fresh!!.iat)
-        now = 1004
+        now = 1059
         d.refreshNow()
         assertEquals(2, queries)
     }
@@ -230,7 +230,7 @@ class DiscoveryTest {
         val d = NodeDirectory(cfg(k), { if (down) emptyList() else records(k, nodes(2), iat = 900, exp = 99_999) }, { now })
         d.get()
         down = true
-        now = 1010
+        now = 1040
         assertEquals(2, d.refreshNow()!!.nodes.size)
     }
 
