@@ -213,13 +213,100 @@ func dohHandler(records []string) http.Handler {
 	})
 }
 
+// checkDNS fetches the published records the way an app does and verifies them.
+func checkDNS(name, pub, doh string) {
+	if pub == "" {
+		log.Fatal("-check needs -pub <base64 public key>")
+	}
+	der, err := base64.StdEncoding.DecodeString(pub)
+	if err != nil {
+		log.Fatal("bad -pub: ", err)
+	}
+	anyKey, err := x509.ParsePKIXPublicKey(der)
+	pk, ok := anyKey.(*ecdsa.PublicKey)
+	if err != nil || !ok {
+		log.Fatal("-pub is not a P-256 public key")
+	}
+
+	req, _ := http.NewRequest("GET", doh+"?name="+name+"&type=TXT", nil)
+	req.Header.Set("accept", "application/dns-json")
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		log.Fatal("DoH request failed: ", err)
+	}
+	defer resp.Body.Close()
+	var reply struct {
+		Status int
+		Answer []struct {
+			Type int
+			TTL  int
+			Data string
+		}
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&reply); err != nil {
+		log.Fatal("DoH reply is not JSON: ", err)
+	}
+	var recs []string
+	for _, a := range reply.Answer {
+		if a.Type == 16 {
+			recs = append(recs, joinTxtStrings(a.Data))
+		}
+	}
+	fmt.Printf("DoH status %d, %d TXT record(s) at %s\n", reply.Status, len(recs), name)
+	p, err := verifyRecords(recs, pk, time.Now())
+	if err != nil {
+		fmt.Println("FAIL:", err)
+		os.Exit(1)
+	}
+	fmt.Printf("ok   signature valid, signed %s, expires %s (%d days left)\n",
+		time.Unix(p.Iat, 0).Format("2006-01-02 15:04"), time.Unix(p.Exp, 0).Format("2006-01-02"),
+		int(time.Until(time.Unix(p.Exp, 0)).Hours()/24))
+	for _, n := range p.Nodes {
+		fmt.Printf("     node %s:%d pin %s\n", n.H, n.P, n.K)
+	}
+}
+
+// joinTxtStrings turns `"part1" "part2"` into part1part2.
+func joinTxtStrings(s string) string {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, `"`) {
+		return s
+	}
+	var sb strings.Builder
+	in, esc := false, false
+	for _, c := range s {
+		switch {
+		case in && esc:
+			sb.WriteRune(c)
+			esc = false
+		case in && c == '\\':
+			esc = true
+		case in && c == '"':
+			in = false
+		case in:
+			sb.WriteRune(c)
+		case c == '"':
+			in = true
+		}
+	}
+	return sb.String()
+}
+
 func main() {
 	gen := flag.String("gen-key", "", "create a list signing key at this path and print the public key")
 	keyPath := flag.String("key", "", "list signing key file")
 	nodesPath := flag.String("nodes", "nodes.json", "node list file")
 	days := flag.Int("valid-days", 30, "how long the signed list stays valid")
 	serve := flag.String("serve", "", "also serve the records as a fake DoH server on this address (tests)")
+	checkName := flag.String("check", "", "fetch this DNS name's TXT records over DoH and verify them (needs -pub)")
+	pubKey := flag.String("pub", "", "base64 public key to verify against (with -check)")
+	dohURL := flag.String("doh", "https://cloudflare-dns.com/dns-query", "DoH JSON endpoint (with -check)")
 	flag.Parse()
+
+	if *checkName != "" {
+		checkDNS(*checkName, *pubKey, *dohURL)
+		return
+	}
 
 	if *gen != "" {
 		if _, err := os.Stat(*gen); err == nil {
