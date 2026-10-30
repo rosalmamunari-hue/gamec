@@ -117,13 +117,19 @@ internal object Resolvers {
         return Race.first(tasks, staggerMs, overall) ?: emptyList()
     }
 
-    fun query(cfg: DiscoveryConfig, name: String): List<String> =
-        race(build(cfg), name, cfg.timeoutMs, cfg.resolverStaggerMs) { recs ->
-            try {
-                ListVerifier.parse(recs, cfg.publicKey, System.currentTimeMillis() / 1000)
-                true
-            } catch (_: Exception) {
-                false
-            }
+    /**
+     * A resolver wins only with a list that verifies (with [DiscoveryConfig.listKey], so sealed lists count)
+     * and is not older than [minIat], the list already held: a replayed older list cannot crowd out a newer one.
+     */
+    fun query(cfg: DiscoveryConfig, name: String, minIat: Long = 0): List<String> =
+        race(build(cfg), name, cfg.timeoutMs, cfg.resolverStaggerMs) {
+            accepts(cfg, it, minIat, System.currentTimeMillis() / 1000)
+        }
+
+    internal fun accepts(cfg: DiscoveryConfig, recs: List<String>, minIat: Long, nowSec: Long): Boolean =
+        try {
+            ListVerifier.parse(recs, cfg.publicKey, nowSec, cfg.listKey).iat >= minIat
+        } catch (_: Exception) {
+            false
         }
 }

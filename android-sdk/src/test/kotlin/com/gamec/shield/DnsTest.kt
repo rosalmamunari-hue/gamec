@@ -263,6 +263,19 @@ class DnsTest {
     }
 
     @Test
+    fun plainDnsAloneIsEnoughButNothingAtAllIsRejected() {
+        val cfg = DiscoveryConfig("n", "k", "device-1234567890abcdef", dohProviders = emptyList(),
+            dotServers = emptyList(), do53Servers = listOf("223.5.5.5"))
+        assertEquals(1, Resolvers.build(cfg).size)
+        try {
+            DiscoveryConfig("n", "k", "device-1234567890abcdef", dohProviders = emptyList(),
+                dotServers = emptyList(), do53Servers = emptyList())
+            fail("a config with no resolvers was accepted")
+        } catch (_: IllegalArgumentException) {
+        }
+    }
+
+    @Test
     fun resolversInterleaveDotDohAndDo53() {
         val cfg = DiscoveryConfig("n", "k", "device-1234567890abcdef",
             dohProviders = listOf("https://doh1/x"), dotServers = listOf("1.1.1.1"), do53Servers = listOf("9.9.9.9"))

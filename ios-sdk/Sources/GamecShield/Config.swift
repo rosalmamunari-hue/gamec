@@ -104,7 +104,7 @@ public struct DiscoveryConfig {
                 urgentRefresh: TimeInterval = 3,
                 store: ListStore? = nil) throws {
         guard isValidDeviceId(deviceId) else { throw ShieldError.invalidDeviceId }
-        guard !(dohProviders.isEmpty && dotServers.isEmpty) else { throw ShieldError.emptyNodeList }
+        guard !(dohProviders.isEmpty && dotServers.isEmpty && do53Servers.isEmpty) else { throw ShieldError.emptyNodeList }
         self.name = name
         self.publicKey = publicKey
         self.deviceId = deviceId

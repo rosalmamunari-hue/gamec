@@ -1,6 +1,7 @@
 package com.gamec.shield
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -254,6 +255,18 @@ class DiscoveryTest {
         assertEquals(listOf("a.example.com"), l.next)
         assertRejected { ListVerifier.parse(recs, pub(k), 1000) }
         assertRejected { ListVerifier.parse(recs, pub(k), 1000, Base64.getEncoder().encodeToString(ByteArray(32) { 9 })) }
+    }
+
+    /** The resolver race must judge answers the same way the directory does, or a sealed list never wins. */
+    @Test
+    fun theResolverRaceAcceptsASealedListAndRejectsAnOlderOne() {
+        val k = newKey()
+        val c = DiscoveryConfig("_gs.example.com", pub(k), "device-1234567890abcdef", listKey = sealKeyB64)
+        val sealed = records(k, nodes(2), iat = 500, seal = sealKey)
+        assertTrue(Resolvers.accepts(c, sealed, minIat = 0, nowSec = 1000))
+        assertTrue("the same list again is fine", Resolvers.accepts(c, sealed, minIat = 500, nowSec = 1000))
+        assertFalse("older than the list held", Resolvers.accepts(c, sealed, minIat = 501, nowSec = 1000))
+        assertFalse("no key, no win", Resolvers.accepts(cfg(k), sealed, minIat = 0, nowSec = 1000))
     }
 
     @Test

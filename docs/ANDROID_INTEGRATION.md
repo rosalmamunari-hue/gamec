@@ -130,7 +130,7 @@ ShieldConfig(discovery = discovery, deadAfterUnansweredMs = 0)   // 0 = 关闭
 |---|---|---|
 | `connectRetryWindowMs` | 15000 | 连不上节点时，在后台重试多久才放弃。0 = 立刻失败 |
 | `deadAfterUnansweredMs` | 20000 | 发了数据多久没回应就判定连接已死。0 = 关闭 |
-| `connectTimeoutMs` | 3000 | 连单个节点的超时 |
+| `connectTimeoutMs` | 1000 | 连单个节点的超时 |
 | `localPort` | 0 | 本机端口，0 = 系统分配。需要固定端口时才设置 |
 
 `DiscoveryConfig` 里还有 `dohProviders` / `dotServers` / `do53Servers`（查 DNS 用的公共服务器，都用 IP 地址）。

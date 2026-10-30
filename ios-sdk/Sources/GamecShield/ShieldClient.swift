@@ -175,7 +175,8 @@ public final class ShieldClient {
         if source.nodes() == nil { source.refreshNow() }
         guard let nodes = source.nodes() else { return nil }
         selector.update(nodes)
-        guard let tokenString = source.token(ordered: selector.ordered()) else { return nil }
+        // In discovery mode tokens come from the nodes, so a failed token means the nodes failed too
+        guard let tokenString = source.token(ordered: selector.ordered()) else { source.refreshNow(); return nil }
         let token = Data(tokenString.utf8)
         for node in selector.ordered() {
             let done = DispatchSemaphore(value: 0)

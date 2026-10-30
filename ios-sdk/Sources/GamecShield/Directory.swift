@@ -115,7 +115,7 @@ enum ListVerifier {
 /// seen (blocks replay of stale records), and keeps using the last good list until it really expires.
 final class NodeDirectory {
     private let cfg: DiscoveryConfig
-    private let queryTxt: (String) -> [String]
+    private let queryTxt: ((String) -> [String])? // for tests; nil = the real resolvers
     private let clock: () -> Int64
     private let lock = NSLock()
     private var current: NodeList?
@@ -126,7 +126,7 @@ final class NodeDirectory {
          queryTxt: ((String) -> [String])? = nil,
          clock: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970) }) {
         self.cfg = cfg
-        self.queryTxt = queryTxt ?? { Resolvers.query(cfg: cfg, name: $0) }
+        self.queryTxt = queryTxt
         self.clock = clock
         if let saved = cfg.store?.load(), !saved.isEmpty {
             current = try? ListVerifier.parse(saved, publicKeyB64: cfg.publicKey, now: clock(), listKeyB64: cfg.listKey)
@@ -163,7 +163,8 @@ final class NodeDirectory {
         lastTryAt = now
         var found: NodeList?
         for n in names() {
-            guard let f = try? ListVerifier.parse(queryTxt(n), publicKeyB64: cfg.publicKey, now: now,
+            let recs = queryTxt?(n) ?? Resolvers.query(cfg: cfg, name: n, minIat: current?.iat ?? 0)
+            guard let f = try? ListVerifier.parse(recs, publicKeyB64: cfg.publicKey, now: now,
                                                   listKeyB64: cfg.listKey) else { continue }
             if let c = current, f.iat < c.iat { continue } // stale copy at this name; try the next
             found = f

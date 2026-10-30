@@ -86,7 +86,9 @@ class DiscoveryConfig(
 ) {
     init {
         require(DEVICE_ID.matches(deviceId)) { "deviceId must be 16-64 chars of A-Z a-z 0-9 _ -" }
-        require(dohProviders.isNotEmpty()) { "at least one DoH provider is required" }
+        require(dohProviders.isNotEmpty() || dotServers.isNotEmpty() || do53Servers.isNotEmpty()) {
+            "at least one DoH, DoT or plain DNS server is required"
+        }
     }
 
     private companion object {

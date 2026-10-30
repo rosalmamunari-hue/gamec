@@ -104,9 +104,17 @@ enum Resolvers {
         return Race.first(tasks, stagger: stagger, timeout: overall) ?? []
     }
 
-    static func query(cfg: DiscoveryConfig, name: String) -> [String] {
-        race(build(cfg), name: name, timeout: cfg.timeout, stagger: cfg.resolverStagger) { recs in
-            (try? ListVerifier.parse(recs, publicKeyB64: cfg.publicKey, now: Int64(Date().timeIntervalSince1970))) != nil
+    /// A resolver wins only with a list that verifies (with `cfg.listKey`, so sealed lists count) and is not
+    /// older than `minIat`, the list already held: a replayed older list cannot crowd out a newer one.
+    static func query(cfg: DiscoveryConfig, name: String, minIat: Int64 = 0) -> [String] {
+        race(build(cfg), name: name, timeout: cfg.timeout, stagger: cfg.resolverStagger) {
+            accepts(cfg: cfg, records: $0, minIat: minIat, now: Int64(Date().timeIntervalSince1970))
         }
+    }
+
+    static func accepts(cfg: DiscoveryConfig, records: [String], minIat: Int64, now: Int64) -> Bool {
+        guard let l = try? ListVerifier.parse(records, publicKeyB64: cfg.publicKey, now: now,
+                                              listKeyB64: cfg.listKey) else { return false }
+        return l.iat >= minIat
     }
 }

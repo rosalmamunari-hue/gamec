@@ -224,6 +224,18 @@ final class DiscoveryTests: XCTestCase {
                                                     listKeyB64: Data(repeating: 9, count: 32).base64EncodedString()))
     }
 
+    /// The resolver race must judge answers the same way the directory does, or a sealed list never wins.
+    func testTheResolverRaceAcceptsASealedListAndRejectsAnOlderOne() throws {
+        let k = P256.Signing.PrivateKey()
+        let c = try DiscoveryConfig(name: "_gs.example.com", publicKey: pub(k), deviceId: "device-1234567890abcdef",
+                                    listKey: sealKey.base64EncodedString())
+        let sealed = try records(k, nodes(2), iat: 500, seal: sealKey)
+        XCTAssertTrue(Resolvers.accepts(cfg: c, records: sealed, minIat: 0, now: 1000))
+        XCTAssertTrue(Resolvers.accepts(cfg: c, records: sealed, minIat: 500, now: 1000), "the same list again is fine")
+        XCTAssertFalse(Resolvers.accepts(cfg: c, records: sealed, minIat: 501, now: 1000), "older than the list held")
+        XCTAssertFalse(Resolvers.accepts(cfg: try cfg(k), records: sealed, minIat: 0, now: 1000), "no key, no win")
+    }
+
     func testAnUnsealedListIsStillReadWhenTheAppHasAKey() throws {
         let k = P256.Signing.PrivateKey()
         let l = try ListVerifier.parse(try records(k, nodes(2)), publicKeyB64: pub(k), now: 1000,

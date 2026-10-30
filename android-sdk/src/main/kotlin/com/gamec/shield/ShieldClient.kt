@@ -137,7 +137,8 @@ class ShieldClient internal constructor(
     private fun tryOnce(): Socket? {
         val nodes = source.nodes() ?: run { source.refreshNow(); source.nodes() } ?: return null
         selector.update(nodes)
-        val token = (source.token(selector.ordered()) ?: return null).toByteArray()
+        // In discovery mode tokens come from the nodes, so a failed token means the nodes failed too
+        val token = (source.token(selector.ordered()) ?: run { source.refreshNow(); return null }).toByteArray()
         for (node in selector.ordered()) {
             try {
                 val s = connector.connect(node, token, cfg.connectTimeoutMs)

@@ -123,7 +123,8 @@ internal object ListVerifier {
  */
 internal class NodeDirectory(
     private val cfg: DiscoveryConfig,
-    private val queryTxt: (String) -> List<String> = { Resolvers.query(cfg, it) },
+    /** For tests; null = the real resolvers. */
+    private val queryTxt: ((String) -> List<String>)? = null,
     private val clock: () -> Long = { System.currentTimeMillis() / 1000 },
 ) {
     private var current: NodeList? = null
@@ -167,7 +168,8 @@ internal class NodeDirectory(
             var fresh: NodeList? = null
             for (n in names()) {
                 try {
-                    val f = ListVerifier.parse(queryTxt(n), cfg.publicKey, now, cfg.listKey)
+                    val recs = queryTxt?.invoke(n) ?: Resolvers.query(cfg, n, c?.iat ?: 0)
+                    val f = ListVerifier.parse(recs, cfg.publicKey, now, cfg.listKey)
                     if (c != null && f.iat < c.iat) continue // stale copy at this name; try the next
                     fresh = f
                     break

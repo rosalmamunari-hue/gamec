@@ -215,7 +215,13 @@ final class DnsTests: XCTestCase {
 
     func testAConfigWithNoResolversAtAllIsRejected() {
         XCTAssertThrowsError(try DiscoveryConfig(name: "n", publicKey: "k", deviceId: "device-1234567890abcdef",
-                                                 dohProviders: [], dotServers: []))
+                                                 dohProviders: [], dotServers: [], do53Servers: []))
+    }
+
+    func testPlainDnsAloneIsEnough() throws {
+        let cfg = try DiscoveryConfig(name: "n", publicKey: "k", deviceId: "device-1234567890abcdef",
+                                      dohProviders: [], dotServers: [], do53Servers: ["223.5.5.5"])
+        XCTAssertEqual(Resolvers.build(cfg).count, 1)
     }
 
     func testResolversInterleaveDotDohAndDo53() throws {
