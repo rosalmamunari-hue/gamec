@@ -225,6 +225,65 @@ class ReconnectTest {
         assertTrue("uncaught: $uncaught", uncaught.isEmpty())
     }
 
+    /** A connection still being set up when stop() runs must not come to life afterwards. */
+    @Test
+    fun aConnectionBeingSetUpDuringStopIsNotRelayed() {
+        val r = remote(echo = true)
+        val connecting = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val ev = Events()
+        val (shield, port) = client({ _, _, _ ->
+            connecting.countDown()
+            while (true) { // like socket I/O, which stop()'s interrupt does not cut short
+                try { release.await(); break } catch (_: InterruptedException) {}
+            }
+            Socket("127.0.0.1", r.localPort)
+        }, ev)
+        Socket("127.0.0.1", port).use { game ->
+            game.soTimeout = 3000
+            connecting.await()
+            shield.stop()
+            release.countDown()
+            assertEquals("the game socket must be closed", -1, try { game.getInputStream().read() } catch (_: IOException) { -1 })
+        }
+        Thread.sleep(200)
+        assertTrue("connected after stop: ${ev.connected}", ev.connected.isEmpty())
+    }
+
+    @Test
+    fun theProxyCanBeStartedAgainAfterStop() {
+        val r = remote(echo = true)
+        val (shield, _) = client(toRemote(r), Events())
+        shield.stop()
+        val port = shield.start()
+        Socket("127.0.0.1", port).use { s ->
+            s.soTimeout = 3000
+            s.getOutputStream().write("a".toByteArray())
+            assertEquals('a'.code, s.getInputStream().read())
+        }
+    }
+
+    /** 127.0.0.1 is open to every app on the phone; past the cap new connections are turned away. */
+    @Test
+    fun connectionsPastTheCapAreClosed() {
+        val r = remote(echo = true)
+        val cfg = ShieldConfig(listOf(node), { "tok" }, maxConnections = 2)
+        val shield = ShieldClient(cfg, cfg.toSource(), toRemote(r))
+        cleanup += AutoCloseable { shield.stop() }
+        val port = shield.start()
+        val held = (1..2).map { Socket("127.0.0.1", port).also { s -> cleanup += s } }
+        for (s in held) { // both are served
+            s.soTimeout = 3000
+            s.getOutputStream().write("a".toByteArray())
+            assertEquals('a'.code, s.getInputStream().read())
+        }
+        Socket("127.0.0.1", port).use { extra ->
+            extra.soTimeout = 3000
+            val got = try { extra.getOutputStream().write("a".toByteArray()); extra.getInputStream().read() } catch (_: IOException) { -1 }
+            assertEquals("a third connection must be closed", -1, got)
+        }
+    }
+
     @Test
     fun listenerExceptionsDoNotBreakTheProxy() {
         val r = remote(echo = true)

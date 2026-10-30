@@ -30,13 +30,18 @@ internal object PinnedTls {
         val ctx = SSLContext.getInstance("TLSv1.3")
         ctx.init(null, arrayOf(PinTrust(node.pinSha256)), null)
         val raw = Socket()
-        raw.tcpNoDelay = true
-        raw.connect(InetSocketAddress(node.host, node.port), timeoutMs)
-        raw.soTimeout = timeoutMs
-        val s = ctx.socketFactory.createSocket(raw, node.host, node.port, true) as SSLSocket
-        s.enabledProtocols = arrayOf("TLSv1.3")
-        s.startHandshake()
-        s.soTimeout = 0
-        return s
+        try {
+            raw.tcpNoDelay = true
+            raw.connect(InetSocketAddress(node.host, node.port), timeoutMs)
+            raw.soTimeout = timeoutMs
+            val s = ctx.socketFactory.createSocket(raw, node.host, node.port, true) as SSLSocket
+            s.enabledProtocols = arrayOf("TLSv1.3")
+            s.startHandshake()
+            s.soTimeout = 0
+            return s
+        } catch (e: Exception) {
+            try { raw.close() } catch (_: Exception) {} // a failed probe or connect must not leak the socket
+            throw e
+        }
     }
 }

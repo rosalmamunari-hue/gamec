@@ -326,6 +326,48 @@ final class DiscoveryTests: XCTestCase {
         XCTAssertEqual(d.get()?.nodes.count, 2)
     }
 
+    /// After a long time offline the saved list has expired, but an older list must still not be taken.
+    func testDirectoryRemembersHowNewTheExpiredSavedListWas() throws {
+        let k = P256.Signing.PrivateKey()
+        let store = MemoryStore(try records(k, nodes(2), iat: 900, exp: 950))
+        var now: Int64 = 1000
+        var dns = try records(k, nodes(3), iat: 800, exp: 99_999)
+        let d = NodeDirectory(cfg: try cfg(k, store: store), queryTxt: { _ in dns }, clock: { now })
+        XCTAssertNil(d.get(), "a replayed older list was accepted")
+        dns = try records(k, nodes(3), iat: 900, exp: 99_999)
+        now = 1010
+        XCTAssertEqual(d.refreshNow()?.nodes.count, 3)
+    }
+
+    /// A slow DNS read (blocked networks) must not stall every new game connection behind it.
+    func testASlowReadDoesNotHoldUpCallersThatAlreadyHaveAList() throws {
+        let k = P256.Signing.PrivateKey()
+        let recs = try records(k, nodes(2), iat: 900, exp: 99_999)
+        let clockLock = NSLock()
+        var now: Int64 = 1000
+        let reading = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        let callsLock = NSLock()
+        var calls = 0
+        let d = NodeDirectory(cfg: try cfg(k, refresh: 600), queryTxt: { _ in
+            callsLock.lock(); calls += 1; let n = calls; callsLock.unlock()
+            if n > 1 { reading.signal(); release.wait() }
+            return recs
+        }, clock: { clockLock.lock(); defer { clockLock.unlock() }; return now })
+        XCTAssertNotNil(d.get())
+        clockLock.lock(); now = 2000; clockLock.unlock() // the list is due for a refresh
+        let slowDone = DispatchSemaphore(value: 0)
+        Thread { _ = d.get(); slowDone.signal() }.start()
+        reading.wait()
+        // if callers did queue behind the read, let it finish after a while so the test fails instead of hanging
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2) { release.signal() }
+        let t0 = Date()
+        XCTAssertEqual(d.get()?.nodes.count, 2)
+        XCTAssertLessThan(Date().timeIntervalSince(t0), 0.5, "waited behind the slow read")
+        release.signal()
+        slowDone.wait()
+    }
+
     func testDirectorySavesEachGoodListToTheStore() throws {
         let k = P256.Signing.PrivateKey()
         let store = MemoryStore()

@@ -6,6 +6,7 @@ import java.security.KeyFactory
 import java.security.Signature
 import java.security.spec.X509EncodedKeySpec
 import java.util.Base64
+import java.util.concurrent.locks.ReentrantLock
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -127,32 +128,56 @@ internal class NodeDirectory(
     private val queryTxt: ((String) -> List<String>)? = null,
     private val clock: () -> Long = { System.currentTimeMillis() / 1000 },
 ) {
+    private val lock = Any() // guards the fields below; never held while DNS is read
+    private val reading = ReentrantLock() // one DNS read at a time
     private var current: NodeList? = null
+    /** iat of the newest list ever accepted, kept after that list expires: nothing older is taken. */
+    private var floorIat = 0L
     private var nextTryAt = 0L
     private var lastTryAt = Long.MIN_VALUE / 2
 
     init {
-        try {
-            val saved = cfg.store?.load().orEmpty()
-            if (saved.isNotEmpty()) current = ListVerifier.parse(saved, cfg.publicKey, clock(), cfg.listKey)
-        } catch (_: Exception) {
-            // a bad or expired saved list is simply not used
+        val saved = try { cfg.store?.load().orEmpty() } catch (_: Exception) { emptyList() }
+        if (saved.isNotEmpty()) {
+            try {
+                val l = ListVerifier.parse(saved, cfg.publicKey, clock(), cfg.listKey)
+                current = l
+                floorIat = l.iat
+            } catch (_: Exception) {
+                // An expired (or bad) saved list is not used, but one that verifies still says how new the
+                // next list must be, so a replayed older one is not taken after a long time offline.
+                try { floorIat = ListVerifier.parse(saved, cfg.publicKey, 0, cfg.listKey).iat } catch (_: Exception) {}
+            }
         }
     }
 
-    @Synchronized
-    fun get(): NodeList? {
-        val now = clock()
-        if (now < nextTryAt) return usable(now)
-        return fetch(now)
-    }
+    fun get(): NodeList? = read { now -> now >= nextTryAt }
 
     /** Re-read now because nothing worked; at most once per [DiscoveryConfig.urgentRefreshSec]. */
-    @Synchronized
-    fun refreshNow(): NodeList? {
+    fun refreshNow(): NodeList? = read { now -> now - lastTryAt >= cfg.urgentRefreshSec }
+
+    /**
+     * Reads DNS when [due] says so. One thread reads at a time; the others go on with the list they have
+     * instead of queueing behind a slow lookup, and wait for the read only when they have none.
+     */
+    private fun read(due: (Long) -> Boolean): NodeList? {
         val now = clock()
-        if (now - lastTryAt < cfg.urgentRefreshSec) return usable(now)
-        return fetch(now)
+        synchronized(lock) { if (!due(now)) return usable(now) }
+        if (!reading.tryLock()) {
+            synchronized(lock) { usable(now) }?.let { return it }
+            reading.lock()
+            reading.unlock()
+            return synchronized(lock) { usable(clock()) }
+        }
+        try {
+            synchronized(lock) {
+                if (!due(now)) return usable(now) // another thread has just read
+                lastTryAt = now
+            }
+            return fetch(now)
+        } finally {
+            reading.unlock()
+        }
     }
 
     /** The names the last good list pointed to come first; the ones built into the app are the fallback. */
@@ -162,29 +187,30 @@ internal class NodeDirectory(
     private fun usable(now: Long): NodeList? = current?.takeIf { now <= it.exp }
 
     private fun fetch(now: Long): NodeList? {
-        lastTryAt = now
-        val c = current
-        try {
-            var fresh: NodeList? = null
-            for (n in names()) {
-                try {
-                    val recs = queryTxt?.invoke(n) ?: Resolvers.query(cfg, n, c?.iat ?: 0)
-                    val f = ListVerifier.parse(recs, cfg.publicKey, now, cfg.listKey)
-                    if (c != null && f.iat < c.iat) continue // stale copy at this name; try the next
-                    fresh = f
-                    break
-                } catch (_: Exception) {
-                    // unreadable or forged at this name; try the next
-                }
+        val (names, floor) = synchronized(lock) { names() to maxOf(floorIat, current?.iat ?: 0L) }
+        var fresh: NodeList? = null
+        for (n in names) {
+            try {
+                val recs = queryTxt?.invoke(n) ?: Resolvers.query(cfg, n, floor)
+                val f = ListVerifier.parse(recs, cfg.publicKey, now, cfg.listKey)
+                if (f.iat < floor) continue // stale copy at this name; try the next
+                fresh = f
+                break
+            } catch (_: Exception) {
+                // unreadable or forged at this name; try the next
             }
-            if (fresh == null) throw SecurityException("no name gave a usable node list")
-            current = fresh
-            nextTryAt = now + cfg.refreshSec
-            try { cfg.store?.save(fresh.records) } catch (_: Exception) {}
-            return fresh
-        } catch (_: Exception) {
-            nextTryAt = now + cfg.retrySec
-            return usable(now)
         }
+        val f = fresh
+            ?: return synchronized(lock) {
+                nextTryAt = now + cfg.retrySec
+                usable(now)
+            }
+        synchronized(lock) {
+            current = f
+            floorIat = f.iat
+            nextTryAt = now + cfg.refreshSec
+        }
+        try { cfg.store?.save(f.records) } catch (_: Exception) {}
+        return f
     }
 }

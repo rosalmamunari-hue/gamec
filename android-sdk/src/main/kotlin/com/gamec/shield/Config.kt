@@ -144,6 +144,11 @@ class ShieldConfig(
      * protocols where the client legitimately sends for a long time without ever getting a reply.
      */
     val deadAfterUnansweredMs: Long = 20_000,
+    /**
+     * Most game connections served at once; more are closed straight away. 127.0.0.1 is reachable by every
+     * app on the phone, so this keeps another app from flooding the proxy.
+     */
+    val maxConnections: Int = 32,
     val listener: ShieldListener? = null,
 ) {
     init {

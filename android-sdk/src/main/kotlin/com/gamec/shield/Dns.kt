@@ -119,14 +119,19 @@ internal object Dot {
     /** TLS with the system trust store; the certificate must match [host] (an IP address works if it is in the SAN). */
     fun tlsConnect(host: String, port: Int, timeoutMs: Int): Socket {
         val raw = Socket()
-        raw.connect(InetSocketAddress(host, port), timeoutMs)
-        raw.soTimeout = timeoutMs
-        val s = (SSLSocketFactory.getDefault() as SSLSocketFactory).createSocket(raw, host, port, true) as SSLSocket
-        val p = s.sslParameters
-        p.endpointIdentificationAlgorithm = "HTTPS"
-        s.sslParameters = p
-        s.startHandshake()
-        return s
+        try {
+            raw.connect(InetSocketAddress(host, port), timeoutMs)
+            raw.soTimeout = timeoutMs
+            val s = (SSLSocketFactory.getDefault() as SSLSocketFactory).createSocket(raw, host, port, true) as SSLSocket
+            val p = s.sslParameters
+            p.endpointIdentificationAlgorithm = "HTTPS"
+            s.sslParameters = p
+            s.startHandshake()
+            return s
+        } catch (e: Exception) {
+            try { raw.close() } catch (_: Exception) {}
+            throw e
+        }
     }
 }
 

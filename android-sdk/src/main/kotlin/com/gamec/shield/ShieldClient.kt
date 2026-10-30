@@ -6,10 +6,13 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ThreadLocalRandom
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 /** Opens one upstream connection to [node] and authenticates it with [token]. */
 internal fun interface Connector {
@@ -54,15 +57,19 @@ class ShieldClient internal constructor(
     constructor(cfg: ShieldConfig) : this(cfg, cfg.toSource(), TlsConnector)
 
     private class Conn(val local: Socket, val upstream: Socket) {
-        /** Millis when data was first sent upstream with nothing received since; 0 = nothing outstanding. */
-        @Volatile var pendingSince = 0L
+        /**
+         * Millis when data was first sent upstream with nothing received since; 0 = nothing outstanding. Set
+         * before the data is written, so a reply (which can only come after) always clears it.
+         */
+        val pendingSince = AtomicLong(0)
     }
 
     private val selector = NodeSelector(cfg.nodes, cfg.failCooldownMs)
-    private val pool = Executors.newCachedThreadPool()
+    @Volatile private var pool: ExecutorService = Executors.newCachedThreadPool()
     private val running = AtomicBoolean(false)
     private val live = ConcurrentHashMap.newKeySet<Conn>()
-    private var server: ServerSocket? = null
+    private val active = AtomicInteger() // local connections being served
+    @Volatile private var server: ServerSocket? = null
 
     private fun emit(block: ShieldListener.() -> Unit) {
         try { cfg.listener?.block() } catch (_: Throwable) {}
@@ -70,8 +77,15 @@ class ShieldClient internal constructor(
 
     fun start(): Int {
         check(running.compareAndSet(false, true)) { "already started" }
-        val ss = ServerSocket(cfg.localPort, 50, InetAddress.getByName("127.0.0.1"))
+        val ss = try {
+            ServerSocket(cfg.localPort, 50, InetAddress.getByName("127.0.0.1"))
+        } catch (e: Exception) {
+            running.set(false)
+            throw e
+        }
         server = ss
+        if (pool.isShutdown) pool = Executors.newCachedThreadPool() // started again after stop()
+        val pool = pool
         pool.execute {
             try {
                 while (running.get()) {
@@ -99,9 +113,17 @@ class ShieldClient internal constructor(
         pool.execute {
             while (running.get()) {
                 val c = try { ss.accept() } catch (_: Exception) { break }
+                // Any app on the phone can reach 127.0.0.1; a cap keeps one from exhausting threads and the
+                // node's per-device limits behind the game's back.
+                if (active.incrementAndGet() > cfg.maxConnections) {
+                    active.decrementAndGet()
+                    try { c.close() } catch (_: Exception) {}
+                    continue
+                }
                 try {
-                    pool.execute { relay(c) }
+                    pool.execute { try { relay(c) } finally { active.decrementAndGet() } }
                 } catch (_: RejectedExecutionException) {
+                    active.decrementAndGet()
                     // stop() raced with this connection
                     try { c.close() } catch (_: Exception) {}
                     break
@@ -124,7 +146,7 @@ class ShieldClient internal constructor(
         if (limit <= 0) return
         val now = System.currentTimeMillis()
         for (c in live) {
-            val since = c.pendingSince
+            val since = c.pendingSince.get()
             if (since != 0L && now - since > limit) {
                 live.remove(c)
                 emit { onConnectionLost("no response for ${(now - since) / 1000}s") }
@@ -133,15 +155,20 @@ class ShieldClient internal constructor(
         }
     }
 
-    /** One round: current nodes, a token, then each node in order. */
-    private fun tryOnce(): Socket? {
+    /** One round: current nodes, a token, then each node in order, until [deadline] (millis). */
+    private fun tryOnce(deadline: Long): Socket? {
         val nodes = source.nodes() ?: run { source.refreshNow(); source.nodes() } ?: return null
         selector.update(nodes)
         // In discovery mode tokens come from the nodes, so a failed token means the nodes failed too
         val token = (source.token(selector.ordered()) ?: run { source.refreshNow(); return null }).toByteArray()
         for (node in selector.ordered()) {
+            if (System.currentTimeMillis() >= deadline) return null
             try {
                 val s = connector.connect(node, token, cfg.connectTimeoutMs)
+                if (!running.get()) { // stopped while connecting
+                    try { s.close() } catch (_: Exception) {}
+                    return null
+                }
                 emit { onConnected(node.toString()) }
                 return s
             } catch (_: Exception) {
@@ -160,8 +187,10 @@ class ShieldClient internal constructor(
         val start = System.currentTimeMillis()
         var backoff = cfg.retryMinMs
         var attempt = 0
+        val deadline = start + cfg.connectRetryWindowMs
         while (running.get()) {
-            tryOnce()?.let { return it }
+            // the first round tries every node, as before; later ones stop at the end of the window
+            tryOnce(if (attempt == 0) Long.MAX_VALUE else deadline)?.let { return it }
             val left = cfg.connectRetryWindowMs - (System.currentTimeMillis() - start)
             if (left <= 0) break
             attempt++
@@ -197,6 +226,10 @@ class ShieldClient internal constructor(
             val c = Conn(local, upstream)
             conn = c
             live.add(c)
+            if (!running.get()) { // stop() ran while this one was connecting and did not see it in live
+                closeBoth(local, upstream)
+                return
+            }
             val t = Thread { pipe(local.getInputStream(), upstream.getOutputStream(), c, outbound = true) }
             t.start()
             pipe(upstream.getInputStream(), local.getOutputStream(), c, outbound = false)
@@ -216,10 +249,9 @@ class ShieldClient internal constructor(
             while (true) {
                 val n = i.read(buf)
                 if (n < 0) break
-                if (!outbound) c.pendingSince = 0L
+                if (outbound) c.pendingSince.compareAndSet(0L, System.currentTimeMillis()) else c.pendingSince.set(0L)
                 o.write(buf, 0, n)
                 o.flush()
-                if (outbound && c.pendingSince == 0L) c.pendingSince = System.currentTimeMillis()
             }
         } catch (_: Exception) {
         } finally {

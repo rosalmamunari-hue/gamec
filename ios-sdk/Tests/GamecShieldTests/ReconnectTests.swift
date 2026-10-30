@@ -239,4 +239,37 @@ final class ReconnectTests: XCTestCase {
             XCTAssertTrue(game.wait(3) { game.closed } || true) // must simply not crash or hang
         }
     }
+
+    /// Calling start() again while running (back in the foreground) starts over on a working port.
+    func testStartingAgainWhileRunningGivesAWorkingProxy() throws {
+        let remote = try Remote(echo: true)
+        addTeardownBlock { remote.stop() }
+        let (shield, _) = try makeClient(plainConnector(to: remote.port), Events())
+        let port = try shield.start()
+        let game = GameSocket(port: port)
+        addTeardownBlock { game.close() }
+        game.send("ping")
+        XCTAssertTrue(game.wait(3) { game.data == Data("ping".utf8) })
+    }
+
+    /// 127.0.0.1 is open to every app on the device; past the cap new connections are turned away.
+    func testConnectionsPastTheCapAreClosed() throws {
+        let remote = try Remote(echo: true)
+        addTeardownBlock { remote.stop() }
+        let cfg = ShieldConfig(nodes: [node], tokenProvider: { "tok" }, maxConnections: 2)
+        let shield = ShieldClient(config: cfg, source: cfg.makeSource(), connector: plainConnector(to: remote.port))
+        let port = try shield.start()
+        addTeardownBlock { shield.stop() }
+        let held = [GameSocket(port: port), GameSocket(port: port)]
+        for g in held {
+            addTeardownBlock { g.close() }
+            g.send("a")
+            XCTAssertTrue(g.wait(3) { g.data == Data("a".utf8) }, "both connections under the cap are served")
+        }
+        let extra = GameSocket(port: port)
+        addTeardownBlock { extra.close() }
+        extra.send("a")
+        XCTAssertTrue(extra.wait(3) { extra.closed }, "a third connection must be closed")
+        XCTAssertTrue(extra.data.isEmpty)
+    }
 }

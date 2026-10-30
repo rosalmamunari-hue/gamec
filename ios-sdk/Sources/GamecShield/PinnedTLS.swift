@@ -12,6 +12,9 @@ enum PinnedTLS {
         0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00,
     ])
 
+    /// Pin checks are short and never block; a queue of their own keeps them from waiting behind other work.
+    private static let verifyQueue = DispatchQueue(label: "gamec.shield.verify")
+
     static func pin(of cert: SecCertificate) -> String? {
         guard let key = SecCertificateCopyKey(cert),
               let raw = SecKeyCopyExternalRepresentation(key, nil) as Data? else { return nil }
@@ -28,7 +31,7 @@ enum PinnedTLS {
             guard let chain = SecTrustCopyCertificateChain(secTrust) as? [SecCertificate],
                   let leaf = chain.first else { return complete(false) }
             complete(pin(of: leaf) == node.pinSha256)
-        }, DispatchQueue.global())
+        }, verifyQueue)
 
         let tcp = NWProtocolTCP.Options()
         tcp.noDelay = true

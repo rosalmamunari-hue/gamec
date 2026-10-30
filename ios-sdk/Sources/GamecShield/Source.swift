@@ -33,9 +33,10 @@ final class ControlSource: Source {
 final class DiscoverySource: Source {
     private let directory: NodeDirectory
     private let tokens: TokenManager
-    init(_ cfg: DiscoveryConfig) {
+    /// Asking a node for a token is a connection to it, so it gets the same timeout as a connection.
+    init(_ cfg: DiscoveryConfig, connectTimeout: TimeInterval) {
         directory = NodeDirectory(cfg: cfg)
-        tokens = TokenManager(deviceId: cfg.deviceId, margin: Int64(cfg.tokenMargin), timeout: cfg.timeout)
+        tokens = TokenManager(deviceId: cfg.deviceId, margin: Int64(cfg.tokenMargin), timeout: connectTimeout)
     }
     func nodes() -> [Node]? { directory.get()?.nodes }
     func refreshNow() { _ = directory.refreshNow() }
@@ -44,7 +45,7 @@ final class DiscoverySource: Source {
 
 extension ShieldConfig {
     func makeSource() -> Source {
-        if let d = discovery { return DiscoverySource(d) }
+        if let d = discovery { return DiscoverySource(d, connectTimeout: connectTimeout) }
         if let c = control { return ControlSource(c) }
         return StaticSource(nodes: nodes, provider: tokenProvider!)
     }

@@ -117,8 +117,11 @@ final class NodeDirectory {
     private let cfg: DiscoveryConfig
     private let queryTxt: ((String) -> [String])? // for tests; nil = the real resolvers
     private let clock: () -> Int64
-    private let lock = NSLock()
+    private let lock = NSLock() // guards the fields below; never held while DNS is read
+    private let reading = NSLock() // one DNS read at a time
     private var current: NodeList?
+    /// iat of the newest list ever accepted, kept after that list expires: nothing older is taken.
+    private var floorIat: Int64 = 0
     private var nextTryAt: Int64 = 0
     private var lastTryAt: Int64?
 
@@ -129,22 +132,48 @@ final class NodeDirectory {
         self.queryTxt = queryTxt
         self.clock = clock
         if let saved = cfg.store?.load(), !saved.isEmpty {
-            current = try? ListVerifier.parse(saved, publicKeyB64: cfg.publicKey, now: clock(), listKeyB64: cfg.listKey)
+            if let l = try? ListVerifier.parse(saved, publicKeyB64: cfg.publicKey, now: clock(), listKeyB64: cfg.listKey) {
+                current = l
+                floorIat = l.iat
+            } else if let old = try? ListVerifier.parse(saved, publicKeyB64: cfg.publicKey, now: 0,
+                                                        listKeyB64: cfg.listKey) {
+                // An expired saved list is not used, but it still says how new the next list must be, so a
+                // replayed older one is not taken after a long time offline.
+                floorIat = old.iat
+            }
         }
     }
 
-    func get() -> NodeList? {
-        lock.lock(); defer { lock.unlock() }
-        let now = clock()
-        if now < nextTryAt { return usable(now) }
-        return fetch(now)
-    }
+    func get() -> NodeList? { read { [self] now in now >= nextTryAt } }
 
     /// Re-read now because nothing worked; at most once per `urgentRefresh`.
     func refreshNow() -> NodeList? {
-        lock.lock(); defer { lock.unlock() }
+        read { [self] now in lastTryAt.map { Double(now - $0) >= cfg.urgentRefresh } ?? true }
+    }
+
+    /// Reads DNS when `due` says so (called under `lock`). One thread reads at a time; the others go on with
+    /// the list they have instead of queueing behind a slow lookup, and wait for the read only when they have
+    /// none.
+    private func read(_ due: (Int64) -> Bool) -> NodeList? {
         let now = clock()
-        if let last = lastTryAt, Double(now - last) < cfg.urgentRefresh { return usable(now) }
+        lock.lock()
+        if !due(now) { defer { lock.unlock() }; return usable(now) }
+        lock.unlock()
+        if !reading.try() {
+            lock.lock()
+            let have = usable(now)
+            lock.unlock()
+            if let have = have { return have }
+            reading.lock()
+            reading.unlock()
+            lock.lock(); defer { lock.unlock() }
+            return usable(clock())
+        }
+        defer { reading.unlock() }
+        lock.lock()
+        if !due(now) { defer { lock.unlock() }; return usable(now) } // another thread has just read
+        lastTryAt = now
+        lock.unlock()
         return fetch(now)
     }
 
@@ -160,22 +189,29 @@ final class NodeDirectory {
     }
 
     private func fetch(_ now: Int64) -> NodeList? {
-        lastTryAt = now
+        lock.lock()
+        let names = names()
+        let floor = max(floorIat, current?.iat ?? 0)
+        lock.unlock()
         var found: NodeList?
-        for n in names() {
-            let recs = queryTxt?(n) ?? Resolvers.query(cfg: cfg, name: n, minIat: current?.iat ?? 0)
+        for n in names {
+            let recs = queryTxt?(n) ?? Resolvers.query(cfg: cfg, name: n, minIat: floor)
             guard let f = try? ListVerifier.parse(recs, publicKeyB64: cfg.publicKey, now: now,
                                                   listKeyB64: cfg.listKey) else { continue }
-            if let c = current, f.iat < c.iat { continue } // stale copy at this name; try the next
+            if f.iat < floor { continue } // stale copy at this name; try the next
             found = f
             break
         }
+        lock.lock()
         guard let fresh = found else {
             nextTryAt = now + Int64(cfg.retryInterval)
+            defer { lock.unlock() }
             return usable(now)
         }
         current = fresh
+        floorIat = fresh.iat
         nextTryAt = now + Int64(cfg.refreshInterval)
+        lock.unlock()
         cfg.store?.save(fresh.records)
         return fresh
     }

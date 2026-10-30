@@ -55,6 +55,7 @@ public final class ShieldClient {
     private var probeTimer: DispatchSourceTimer?
     private var watchdogTimer: DispatchSourceTimer?
     private var live: [Conn] = [] // queue only
+    private var active = 0 // game connections being served; queue only
     private let runLock = NSLock()
     private var runningFlag = false
 
@@ -74,16 +75,24 @@ public final class ShieldClient {
         set { runLock.lock(); runningFlag = newValue; runLock.unlock() }
     }
 
+    deinit {
+        listener?.cancel()
+        probeTimer?.cancel()
+        watchdogTimer?.cancel()
+    }
+
     /// Refreshes the session (blocking, so never on the shield queue) and re-measures every node.
     private func refreshAndProbe() {
-        DispatchQueue.global().async { [self] in
+        Blocking.run("gamec.shield.probe") { [self] in
             if let n = source.nodes() { selector.update(n) }
             selector.probeAll(timeout: cfg.connectTimeout, queue: queue)
         }
     }
 
-    /// Starts the loopback listener and returns the local port.
+    /// Starts the loopback listener and returns the local port. Calling it again while running starts over
+    /// (for example back in the foreground, where iOS may have stopped the listener while suspended).
     public func start() throws -> UInt16 {
+        if running { stop() }
         let params = NWParameters.tcp
         params.requiredInterfaceType = .loopback
         let l = try NWListener(using: params, on: cfg.localPort == 0 ? .any : NWEndpoint.Port(rawValue: cfg.localPort)!)
@@ -100,8 +109,14 @@ public final class ShieldClient {
         l.newConnectionHandler = { [weak self] local in self?.accept(local) }
         l.start(queue: queue)
         _ = ready.wait(timeout: .now() + 3)
-        if let e = failure { throw e }
-        guard let port = l.port?.rawValue else { throw NWError.posix(.EADDRNOTAVAIL) }
+        if let e = failure {
+            l.cancel()
+            throw e
+        }
+        guard let port = l.port?.rawValue else {
+            l.cancel()
+            throw NWError.posix(.EADDRNOTAVAIL)
+        }
         listener = l
         running = true
 
@@ -146,23 +161,36 @@ public final class ShieldClient {
     private func close(_ c: Conn) {
         guard !c.closed else { return }
         c.closed = true
+        active -= 1
         live.removeAll { $0 === c }
         c.local.cancel()
         c.upstream.cancel()
     }
 
+    /// Runs on `queue`.
     private func accept(_ local: NWConnection) {
+        // Any app on the device can reach 127.0.0.1; a cap keeps one from exhausting threads and the node's
+        // per-device limits behind the game's back.
+        guard active < cfg.maxConnections else {
+            local.cancel()
+            return
+        }
+        active += 1
         local.start(queue: queue)
         // Looking up the session and retrying can block for a while, so keep it off the shield queue.
-        DispatchQueue.global().async { [self] in
+        Blocking.run("gamec.shield.connect") { [self] in
             guard let up = openUpstream() else {
-                queue.async { local.cancel() }
+                queue.async { [self] in
+                    local.cancel()
+                    active -= 1
+                }
                 return
             }
             queue.async { [self] in
                 guard running else {
                     local.cancel()
                     up.cancel()
+                    active -= 1
                     return
                 }
                 bridge(local, up)
@@ -170,8 +198,8 @@ public final class ShieldClient {
         }
     }
 
-    /// One round: current nodes, a token, then each node in order. Blocking.
-    private func tryOnce() -> NWConnection? {
+    /// One round: current nodes, a token, then each node in order until `deadline`. Blocking.
+    private func tryOnce(until deadline: Date) -> NWConnection? {
         if source.nodes() == nil { source.refreshNow() }
         guard let nodes = source.nodes() else { return nil }
         selector.update(nodes)
@@ -179,6 +207,7 @@ public final class ShieldClient {
         guard let tokenString = source.token(ordered: selector.ordered()) else { source.refreshNow(); return nil }
         let token = Data(tokenString.utf8)
         for node in selector.ordered() {
+            if Date() >= deadline { return nil }
             let done = DispatchSemaphore(value: 0)
             var result: NWConnection?
             connector(node, token, cfg.connectTimeout, queue) { conn in
@@ -187,6 +216,10 @@ public final class ShieldClient {
             }
             done.wait()
             if let conn = result {
+                guard running else { // stopped while connecting
+                    conn.cancel()
+                    return nil
+                }
                 cfg.listener?.shieldConnected(node: "\(node.host):\(node.port)")
                 return conn
             }
@@ -202,8 +235,10 @@ public final class ShieldClient {
         let start = Date()
         var backoff = cfg.retryMin
         var attempt = 0
+        let deadline = start.addingTimeInterval(cfg.connectRetryWindow)
         while running {
-            if let conn = tryOnce() { return conn }
+            // the first round tries every node, as before; later ones stop at the end of the window
+            if let conn = tryOnce(until: attempt == 0 ? .distantFuture : deadline) { return conn }
             let left = cfg.connectRetryWindow - Date().timeIntervalSince(start)
             if left <= 0 { break }
             attempt += 1
@@ -226,12 +261,15 @@ public final class ShieldClient {
     private func pump(from: NWConnection, to: NWConnection, _ c: Conn, outbound: Bool) {
         from.receive(minimumIncompleteLength: 1, maximumLength: 16 * 1024) { [self] data, _, isComplete, error in
             if let data = data, !data.isEmpty {
-                if !outbound { c.pendingSince = nil }
+                if outbound {
+                    if c.pendingSince == nil { c.pendingSince = Date() }
+                } else {
+                    c.pendingSince = nil
+                }
                 to.send(content: data, completion: .contentProcessed { [self] err in
                     if err != nil || isComplete || error != nil {
                         close(c)
                     } else {
-                        if outbound && c.pendingSince == nil { c.pendingSince = Date() }
                         pump(from: from, to: to, c, outbound: outbound)
                     }
                 })

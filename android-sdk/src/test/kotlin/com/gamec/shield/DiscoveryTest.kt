@@ -360,6 +360,50 @@ class DiscoveryTest {
         assertEquals(2, d.get()!!.nodes.size)
     }
 
+    /** After a long time offline the saved list has expired, but an older list must still not be taken. */
+    @Test
+    fun directoryRemembersHowNewTheExpiredSavedListWas() {
+        val k = newKey()
+        val saved = records(k, nodes(2), iat = 900, exp = 950)
+        val store = object : ListStore {
+            override fun load() = saved
+            override fun save(records: List<String>) {}
+        }
+        var now = 1000L
+        var dns = records(k, nodes(3), iat = 800, exp = 99_999)
+        val d = NodeDirectory(cfg(k, store = store), { dns }, { now })
+        assertNull("a replayed older list was accepted", d.get())
+        dns = records(k, nodes(3), iat = 900, exp = 99_999)
+        now = 1010
+        assertEquals(3, d.refreshNow()!!.nodes.size)
+    }
+
+    /** A slow DNS read (blocked networks) must not stall every new game connection behind it. */
+    @Test
+    fun aSlowReadDoesNotHoldUpCallersThatAlreadyHaveAList() {
+        val k = newKey()
+        var now = 1000L
+        val release = java.util.concurrent.CountDownLatch(1)
+        val reading = java.util.concurrent.CountDownLatch(1)
+        var calls = 0
+        val d = NodeDirectory(cfg(k, refreshSec = 600), {
+            if (++calls > 1) { reading.countDown(); release.await() }
+            records(k, nodes(2), iat = 900, exp = 99_999)
+        }, { now })
+        assertNotNull(d.get())
+        now = 2000 // the list is due for a refresh
+        val slow = Thread { d.get() }
+        slow.start()
+        reading.await()
+        // if callers did queue behind the read, let it finish after a while so the test fails instead of hanging
+        Thread { Thread.sleep(2000); release.countDown() }.apply { isDaemon = true }.start()
+        val t0 = System.currentTimeMillis()
+        assertEquals(2, d.get()!!.nodes.size)
+        assertTrue("waited behind the slow read", System.currentTimeMillis() - t0 < 500)
+        release.countDown()
+        slow.join()
+    }
+
     @Test
     fun directorySavesEachGoodListToTheStore() {
         val k = newKey()

@@ -168,6 +168,9 @@ public struct ShieldConfig {
     /// notices a dead path in seconds instead of minutes and reconnects. 0 disables. Do not use it for
     /// protocols where the client legitimately sends for a long time without ever getting a reply.
     public let deadAfterUnanswered: TimeInterval
+    /// Most game connections served at once; more are closed straight away. 127.0.0.1 is reachable by every
+    /// app on the device, so this keeps another app from flooding the proxy.
+    public let maxConnections: Int
     public let listener: ShieldListener?
 
     public init(nodes: [Node] = [],
@@ -182,6 +185,7 @@ public struct ShieldConfig {
                 retryMin: TimeInterval = 0.2,
                 retryMax: TimeInterval = 3,
                 deadAfterUnanswered: TimeInterval = 20,
+                maxConnections: Int = 32,
                 listener: ShieldListener? = nil) {
         precondition(discovery != nil || control != nil || (!nodes.isEmpty && tokenProvider != nil),
                      "provide discovery, control, or both nodes and tokenProvider")
@@ -197,6 +201,7 @@ public struct ShieldConfig {
         self.retryMin = retryMin
         self.retryMax = retryMax
         self.deadAfterUnanswered = deadAfterUnanswered
+        self.maxConnections = maxConnections
         self.listener = listener
     }
 }

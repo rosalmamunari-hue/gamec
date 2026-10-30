@@ -27,7 +27,7 @@ enum Race {
         let signal = DispatchSemaphore(value: 0)
 
         for (i, task) in tasks.enumerated() {
-            DispatchQueue.global().async {
+            Blocking.run("gamec.race") {
                 if i > 0 { Thread.sleep(forTimeInterval: Double(i) * stagger) }
                 lock.lock(); let skip = cancelled; lock.unlock()
                 let result = skip ? nil : task()

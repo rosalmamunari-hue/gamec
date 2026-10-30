@@ -149,7 +149,8 @@ enum Dot {
 enum Do53 {
     private static func truncated(_ msg: Data) -> Bool {
         guard msg.count >= 4 else { return false }
-        let flags = Int(msg[2]) << 8 | Int(msg[3])
+        let s = msg.startIndex // may be a slice, which keeps its parent's indices
+        let flags = Int(msg[s + 2]) << 8 | Int(msg[s + 3])
         return flags & 0x0200 != 0
     }
 

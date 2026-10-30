@@ -73,8 +73,22 @@ internal fun httpGetDnsJson(url: String, timeoutMs: Int): String {
         conn.readTimeout = timeoutMs
         conn.setRequestProperty("accept", "application/dns-json")
         if (conn.responseCode != 200) throw java.io.IOException("DoH returned HTTP ${conn.responseCode}")
-        return conn.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+        return conn.inputStream.use { readCapped(it, MAX_DOH_BYTES).toString(Charsets.UTF_8) }
     } finally {
         conn.disconnect()
+    }
+}
+
+/** A TXT answer for a node list is a few KB; more than this is a broken or hostile server. */
+internal const val MAX_DOH_BYTES = 64 * 1024
+
+internal fun readCapped(i: java.io.InputStream, max: Int): ByteArray {
+    val out = java.io.ByteArrayOutputStream()
+    val buf = ByteArray(8192)
+    while (true) {
+        val n = i.read(buf)
+        if (n < 0) return out.toByteArray()
+        if (out.size() + n > max) throw java.io.IOException("DoH answer larger than $max bytes")
+        out.write(buf, 0, n)
     }
 }
