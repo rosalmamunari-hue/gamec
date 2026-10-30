@@ -39,12 +39,12 @@ enum ListVerifier {
     }
 
     static func parse(_ records: [String], publicKeyB64: String, now: Int64) throws -> NodeList {
-        let gs = records.filter { $0.hasPrefix("gs1:") }
+        let gs = records.filter { $0.range(of: "^[0-9]{1,3}/[0-9]{1,3}:", options: .regularExpression) != nil }
         // total -> (index -> data); only complete, unambiguous groups are tried
         var groups: [Int: [Int: String]] = [:]
         var ambiguous = Set<Int>()
         for r in gs {
-            let f = r.dropFirst(4).split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+            let f = r.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
             guard f.count == 2 else { continue }
             let pos = f[0].split(separator: "/", omittingEmptySubsequences: false)
             guard pos.count == 2, let i = Int(pos[0]), let n = Int(pos[1]), i >= 1, i <= n else { continue }

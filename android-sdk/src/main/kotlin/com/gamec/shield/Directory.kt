@@ -29,14 +29,16 @@ internal class NodeList(val nodes: List<Node>, val iat: Long, val exp: Long, val
  */
 internal object ListVerifier {
     private val b64 = Base64.getUrlDecoder()
+    private val recordRe = Regex("^[0-9]{1,3}/[0-9]{1,3}:")
+    fun isRecord(r: String) = recordRe.containsMatchIn(r)
 
     fun parse(records: List<String>, publicKeyB64: String, nowSec: Long): NodeList {
         // part index -> data, grouped by the total the record claims; only complete groups are tried
         val groups = HashMap<Int, HashMap<Int, String>>()
         val dup = HashSet<Int>()
         for (r in records) {
-            if (!r.startsWith("gs1:")) continue
-            val f = r.substring(4).split(":", limit = 2)
+            if (!isRecord(r)) continue
+            val f = r.split(":", limit = 2)
             if (f.size != 2) continue
             val pos = f[0].split("/")
             val i = pos.getOrNull(0)?.toIntOrNull() ?: continue
@@ -47,12 +49,12 @@ internal object ListVerifier {
         }
 
         var best: NodeList? = null
-        var lastError: Exception = IllegalStateException("no gs1 records")
+        var lastError: Exception = IllegalStateException("no list records")
         for ((n, parts) in groups) {
             if (n in dup || parts.size != n) continue
             try {
                 val body = (1..n).joinToString("") { parts[it]!! }
-                val l = verify(body, publicKeyB64, nowSec, records.filter { it.startsWith("gs1:") })
+                val l = verify(body, publicKeyB64, nowSec, records.filter { isRecord(it) })
                 if (best == null || l.iat > best.iat) best = l
             } catch (e: Exception) {
                 lastError = e

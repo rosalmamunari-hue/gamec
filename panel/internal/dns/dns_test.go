@@ -40,7 +40,7 @@ func runScenarios(t *testing.T, mk func(t *testing.T) (Provider, fakeDNS)) {
 	v := func(n ...int) []string {
 		var o []string
 		for _, i := range n {
-			o = append(o, fmt.Sprintf("gs1:%d/3:data%d", i, i))
+			o = append(o, fmt.Sprintf("%d/3:data%d", i, i))
 		}
 		return o
 	}
@@ -57,7 +57,7 @@ func runScenarios(t *testing.T, mk func(t *testing.T) (Provider, fakeDNS)) {
 	})
 	t.Run("replaces a list with a different one of the same size", func(t *testing.T) {
 		p, f := mk(t)
-		f.Seed([]string{"gs1:1/3:old1", "gs1:2/3:old2", "gs1:3/3:old3"}, nil)
+		f.Seed([]string{"1/3:old1", "2/3:old2", "3/3:old3"}, nil)
 		if err := p.ReplaceTXT(ctx, zone, name, v(1, 2, 3)); err != nil {
 			t.Fatal(err)
 		}
@@ -68,7 +68,7 @@ func runScenarios(t *testing.T, mk func(t *testing.T) (Provider, fakeDNS)) {
 	t.Run("shrinks 3 records to 2", func(t *testing.T) {
 		p, f := mk(t)
 		f.Seed(v(1, 2, 3), nil)
-		want := []string{"gs1:1/2:new1", "gs1:2/2:new2"}
+		want := []string{"1/2:new1", "2/2:new2"}
 		if err := p.ReplaceTXT(ctx, zone, name, want); err != nil {
 			t.Fatal(err)
 		}
@@ -78,7 +78,7 @@ func runScenarios(t *testing.T, mk func(t *testing.T) (Provider, fakeDNS)) {
 	})
 	t.Run("grows 2 records to 3", func(t *testing.T) {
 		p, f := mk(t)
-		f.Seed([]string{"gs1:1/2:a", "gs1:2/2:b"}, nil)
+		f.Seed([]string{"1/2:a", "2/2:b"}, nil)
 		if err := p.ReplaceTXT(ctx, zone, name, v(1, 2, 3)); err != nil {
 			t.Fatal(err)
 		}
@@ -88,7 +88,7 @@ func runScenarios(t *testing.T, mk func(t *testing.T) (Provider, fakeDNS)) {
 	})
 	t.Run("never touches other TXT records on the same name", func(t *testing.T) {
 		p, f := mk(t)
-		f.Seed([]string{"gs1:1/1:old"}, others)
+		f.Seed([]string{"1/1:old"}, others)
 		if err := p.ReplaceTXT(ctx, zone, name, v(1, 2, 3)); err != nil {
 			t.Fatal(err)
 		}
@@ -207,7 +207,7 @@ func (f *fakeSpaceship) handle(w http.ResponseWriter, r *http.Request) {
 func (f *fakeSpaceship) Seed(ours, others []string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.recs = []ssRec{{"A", "_gs", "1.2.3.4"}, {"TXT", "elsewhere", "gs1:1/1:not-ours-by-name"}}
+	f.recs = []ssRec{{"A", "_gs", "1.2.3.4"}, {"TXT", "elsewhere", "1/1:not-ours-by-name"}}
 	for _, v := range ours {
 		f.recs = append(f.recs, ssRec{"TXT", "_gs", v})
 	}
@@ -242,22 +242,22 @@ func TestSpaceship(t *testing.T) {
 func TestSpaceshipSendsCredentialsAndRejectsBadOnes(t *testing.T) {
 	f := newFakeSpaceship(t)
 	good := newSpaceship("key", "secret", Options{BaseURL: f.srv.URL})
-	if err := good.ReplaceTXT(context.Background(), "example.com", "_gs.example.com", []string{"gs1:1/1:x"}); err != nil || !f.sawHeader {
+	if err := good.ReplaceTXT(context.Background(), "example.com", "_gs.example.com", []string{"1/1:x"}); err != nil || !f.sawHeader {
 		t.Fatalf("good credentials failed: %v", err)
 	}
 	bad := newSpaceship("key", "WRONG", Options{BaseURL: f.srv.URL})
-	if err := bad.ReplaceTXT(context.Background(), "example.com", "_gs.example.com", []string{"gs1:1/1:y"}); err == nil {
+	if err := bad.ReplaceTXT(context.Background(), "example.com", "_gs.example.com", []string{"1/1:y"}); err == nil {
 		t.Fatal("wrong secret accepted")
 	}
 }
 
 func TestSpaceshipRestoresTheOldListWhenTheNewOneCannotBeWritten(t *testing.T) {
 	f := newFakeSpaceship(t)
-	old := []string{"gs1:1/2:old1", "gs1:2/2:old2"}
+	old := []string{"1/2:old1", "2/2:old2"}
 	f.Seed(old, nil)
 	f.failPuts = 3 // every attempt to add the new records fails; the restore after that works
 	p := newSpaceship("key", "secret", Options{BaseURL: f.srv.URL, Sleep: func(time.Duration) {}})
-	err := p.ReplaceTXT(context.Background(), "example.com", "_gs.example.com", []string{"gs1:1/1:new"})
+	err := p.ReplaceTXT(context.Background(), "example.com", "_gs.example.com", []string{"1/1:new"})
 	if err == nil {
 		t.Fatal("a failed write must be reported")
 	}
@@ -268,12 +268,12 @@ func TestSpaceshipRestoresTheOldListWhenTheNewOneCannotBeWritten(t *testing.T) {
 
 func TestSpaceshipPagesThroughManyRecords(t *testing.T) {
 	f := newFakeSpaceship(t)
-	f.Seed([]string{"gs1:1/3:a", "gs1:2/3:b", "gs1:3/3:c"}, []string{"x", "y", "z"}) // 3+3+2 records, pages of 2
+	f.Seed([]string{"1/3:a", "2/3:b", "3/3:c"}, []string{"x", "y", "z"}) // 3+3+2 records, pages of 2
 	p := newSpaceship("key", "secret", Options{BaseURL: f.srv.URL})
-	if err := p.ReplaceTXT(context.Background(), "example.com", "_gs.example.com", []string{"gs1:1/1:only"}); err != nil {
+	if err := p.ReplaceTXT(context.Background(), "example.com", "_gs.example.com", []string{"1/1:only"}); err != nil {
 		t.Fatal(err)
 	}
-	if !equalSets(f.Ours(), []string{"gs1:1/1:only"}) || len(f.Others()) != 3 {
+	if !equalSets(f.Ours(), []string{"1/1:only"}) || len(f.Others()) != 3 {
 		t.Fatalf("ours=%v others=%v", f.Ours(), f.Others())
 	}
 }
@@ -396,10 +396,10 @@ func TestCloudflare(t *testing.T) {
 
 func TestCloudflareUpdatesInPlaceWhenTheCountIsUnchanged(t *testing.T) {
 	f := newFakeCloudflare(t)
-	f.Seed([]string{"gs1:1/2:a", "gs1:2/2:b"}, nil)
+	f.Seed([]string{"1/2:a", "2/2:b"}, nil)
 	p := newCloudflare("tok", Options{BaseURL: f.srv.URL + "/client/v4"})
 	ids := []string{f.recs[0].ID, f.recs[1].ID}
-	if err := p.ReplaceTXT(context.Background(), "example.com", "_gs.example.com", []string{"gs1:1/2:c", "gs1:2/2:d"}); err != nil {
+	if err := p.ReplaceTXT(context.Background(), "example.com", "_gs.example.com", []string{"1/2:c", "2/2:d"}); err != nil {
 		t.Fatal(err)
 	}
 	if f.recs[0].ID != ids[0] || f.recs[1].ID != ids[1] {
@@ -410,7 +410,7 @@ func TestCloudflareUpdatesInPlaceWhenTheCountIsUnchanged(t *testing.T) {
 func TestCloudflareReportsAPIErrors(t *testing.T) {
 	f := newFakeCloudflare(t)
 	p := newCloudflare("WRONG", Options{BaseURL: f.srv.URL + "/client/v4"})
-	err := p.ReplaceTXT(context.Background(), "example.com", "_gs.example.com", []string{"gs1:1/1:x"})
+	err := p.ReplaceTXT(context.Background(), "example.com", "_gs.example.com", []string{"1/1:x"})
 	if err == nil || !strings.Contains(err.Error(), "Invalid access token") {
 		t.Fatalf("got %v", err)
 	}
@@ -419,7 +419,7 @@ func TestCloudflareReportsAPIErrors(t *testing.T) {
 func TestCloudflareZoneThatTheTokenCannotSee(t *testing.T) {
 	f := newFakeCloudflare(t)
 	p := newCloudflare("tok", Options{BaseURL: f.srv.URL + "/client/v4"})
-	err := p.ReplaceTXT(context.Background(), "other.org", "_gs.other.org", []string{"gs1:1/1:x"})
+	err := p.ReplaceTXT(context.Background(), "other.org", "_gs.other.org", []string{"1/1:x"})
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("got %v", err)
 	}
@@ -565,14 +565,14 @@ func TestAliyun(t *testing.T) {
 func TestAliyunSignatureIsAcceptedAndWrongSecretIsNot(t *testing.T) {
 	f := newFakeAliyun(t)
 	ok := newAliyun("id", "sec", Options{BaseURL: f.srv.URL})
-	if err := ok.ReplaceTXT(context.Background(), "example.com", "_gs.example.com", []string{"gs1:1/1:v=1+2*3~4 /="}); err != nil {
+	if err := ok.ReplaceTXT(context.Background(), "example.com", "_gs.example.com", []string{"1/1:v=1+2*3~4 /="}); err != nil {
 		t.Fatalf("a correctly signed request, with characters that need escaping, was refused: %v", err)
 	}
 	if f.badSigs != 0 {
 		t.Fatalf("%d bad signatures", f.badSigs)
 	}
 	bad := newAliyun("id", "WRONG", Options{BaseURL: f.srv.URL})
-	err := bad.ReplaceTXT(context.Background(), "example.com", "_gs.example.com", []string{"gs1:1/1:z"})
+	err := bad.ReplaceTXT(context.Background(), "example.com", "_gs.example.com", []string{"1/1:z"})
 	if err == nil || !strings.Contains(err.Error(), "IncompleteSignature") {
 		t.Fatalf("got %v", err)
 	}
@@ -582,7 +582,7 @@ func TestAliyunNeverReusesANonce(t *testing.T) {
 	f := newFakeAliyun(t)
 	p := newAliyun("id", "sec", Options{BaseURL: f.srv.URL})
 	for i := 0; i < 5; i++ {
-		p.ReplaceTXT(context.Background(), "example.com", "_gs.example.com", []string{fmt.Sprintf("gs1:1/1:v%d", i)})
+		p.ReplaceTXT(context.Background(), "example.com", "_gs.example.com", []string{fmt.Sprintf("1/1:v%d", i)})
 	}
 	if f.reusedNon {
 		t.Fatal("a nonce was reused; the service would reject replays")
@@ -605,7 +605,7 @@ func TestManualProviderAlwaysAsksForHands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := p.ReplaceTXT(context.Background(), "example.com", "_gs.example.com", []string{"gs1:1/1:x"}); err != ErrManual {
+	if err := p.ReplaceTXT(context.Background(), "example.com", "_gs.example.com", []string{"1/1:x"}); err != ErrManual {
 		t.Fatalf("got %v", err)
 	}
 }

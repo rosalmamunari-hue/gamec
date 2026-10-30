@@ -27,7 +27,7 @@ final class DiscoveryTests: XCTestCase {
             parts.append(String(rest.prefix(chunk)))
             rest = rest.dropFirst(chunk)
         }
-        return parts.enumerated().map { "gs1:\($0.offset + 1)/\(parts.count):\($0.element)" }
+        return parts.enumerated().map { "\($0.offset + 1)/\(parts.count):\($0.element)" }
     }
 
     private func pub(_ k: P256.Signing.PrivateKey) -> String { k.publicKey.derRepresentation.base64EncodedString() }
@@ -41,8 +41,8 @@ final class DiscoveryTests: XCTestCase {
     // ---- DoH parsing ----
 
     func testDohJoinsSplitQuotedStrings() throws {
-        let json = Data(#"{"Status":0,"Answer":[{"name":"x","type":16,"TTL":60,"data":"\"gs1:1/1:a\" \"bcdef\""}]}"#.utf8)
-        XCTAssertEqual(try Doh.parse(json), ["gs1:1/1:abcdef"])
+        let json = Data(#"{"Status":0,"Answer":[{"name":"x","type":16,"TTL":60,"data":"\"1/1:a\" \"bcdef\""}]}"#.utf8)
+        XCTAssertEqual(try Doh.parse(json), ["1/1:abcdef"])
     }
 
     func testDohIgnoresOtherRecordTypesAndFailures() throws {
@@ -55,9 +55,9 @@ final class DiscoveryTests: XCTestCase {
         let out = Doh.queryTxt(name: "_gs.example.com", providers: ["http://bad/dns", "http://good/dns"], timeout: 1) { url, _ in
             urls.append(url)
             if url.host == "bad" { throw ShieldError.badResponse }
-            return Data(#"{"Status":0,"Answer":[{"type":16,"data":"\"gs1:1/1:zz\""}]}"#.utf8)
+            return Data(#"{"Status":0,"Answer":[{"type":16,"data":"\"1/1:zz\""}]}"#.utf8)
         }
-        XCTAssertEqual(out, ["gs1:1/1:zz"])
+        XCTAssertEqual(out, ["1/1:zz"])
         XCTAssertEqual(urls.count, 2)
         XCTAssertTrue(urls[1].absoluteString.contains("name=_gs.example.com"))
         XCTAssertTrue(urls[1].absoluteString.contains("type=TXT"))
@@ -203,7 +203,7 @@ final class DiscoveryTests: XCTestCase {
         let recs = try records(k, nodes(2), exp: 99_999)
         _ = NodeDirectory(cfg: try cfg(k, store: store), queryTxt: { _ in recs }, clock: { 1000 }).get()
         XCTAssertFalse(store.saved.isEmpty)
-        XCTAssertTrue(store.saved.allSatisfy { $0.hasPrefix("gs1:") })
+        XCTAssertTrue(store.saved.allSatisfy { $0.range(of: "^[0-9]{1,3}/[0-9]{1,3}:", options: .regularExpression) != nil })
     }
 
     // ---- token manager ----

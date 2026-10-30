@@ -52,8 +52,8 @@ final class DnsTests: XCTestCase {
     }
 
     func testParsesSeveralRecordsAndJoinsTheStringsOfEachOne() throws {
-        let msg = response(id: 7, name: "_gs.example.com", answers: [["gs1:1/2:", "abc"], ["gs1:2/2:def"]])
-        XCTAssertEqual(try DnsWire.parseTxt(msg, expectId: 7), ["gs1:1/2:abc", "gs1:2/2:def"])
+        let msg = response(id: 7, name: "_gs.example.com", answers: [["1/2:", "abc"], ["2/2:def"]])
+        XCTAssertEqual(try DnsWire.parseTxt(msg, expectId: 7), ["1/2:abc", "2/2:def"])
     }
 
     func testNoSuchNameGivesAnEmptyList() throws {
@@ -134,9 +134,9 @@ final class DnsTests: XCTestCase {
     private func queryID(_ q: Data) -> Int { Int(q[q.startIndex]) << 8 | Int(q[q.startIndex + 1]) }
 
     func testDotRoundTrip() throws {
-        let s = try DnsTcpServer { q in self.response(id: self.queryID(q), name: "_gs.example.com", answers: [["gs1:1/1:payload"]]) }
+        let s = try DnsTcpServer { q in self.response(id: self.queryID(q), name: "_gs.example.com", answers: [["1/1:payload"]]) }
         defer { s.stop() }
-        XCTAssertEqual(try Dot.query(host: "127.0.0.1", name: "_gs.example.com", timeout: 2, connect: plain(s)), ["gs1:1/1:payload"])
+        XCTAssertEqual(try Dot.query(host: "127.0.0.1", name: "_gs.example.com", timeout: 2, connect: plain(s)), ["1/1:payload"])
     }
 
     func testDotServerThatHangsUpIsAnError() throws {
@@ -157,11 +157,11 @@ final class DnsTests: XCTestCase {
         let resolvers: [NamedResolver] = [
             ("dot:blocked", { _, _ in Thread.sleep(forTimeInterval: 3); return [] }),
             ("doh:broken", { _, _ in [] }),
-            ("doh:good", { _, _ in ["gs1:1/1:ok"] }),
+            ("doh:good", { _, _ in ["1/1:ok"] }),
         ]
         let t0 = Date()
         let got = Resolvers.race(resolvers, name: "n", timeout: 5, stagger: 0.05) { !$0.isEmpty }
-        XCTAssertEqual(got, ["gs1:1/1:ok"])
+        XCTAssertEqual(got, ["1/1:ok"])
         XCTAssertLessThan(Date().timeIntervalSince(t0), 1.5, "must not wait for the slow resolver")
         XCTAssertEqual(Resolvers.lastWinner, "doh:good")
     }

@@ -1,6 +1,6 @@
 // Package dns publishes the signed node list as TXT records at a DNS provider.
 //
-// Every provider implements one call: make the "gs1:" TXT records at a name exactly equal to the given
+// Every provider implements one call: make the list's TXT records ("<i>/<n>:...") at a name exactly equal to the given
 // values. Other TXT records on the same name (SPF, verification tokens) are never touched.
 package dns
 
@@ -12,14 +12,14 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"gamec/edge/shieldlist"
 )
 
 // ErrManual is returned by the manual provider: the records must be pasted by hand.
 var ErrManual = errors.New("this DNS target is manual: publish the records yourself")
 
-const recordPrefix = "gs1:"
-
-func ours(v string) bool { return strings.HasPrefix(v, recordPrefix) }
+func ours(v string) bool { return shieldlist.IsRecord(v) }
 
 type Provider interface {
 	Name() string

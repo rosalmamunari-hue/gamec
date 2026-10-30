@@ -33,7 +33,7 @@ class DiscoveryTest {
         }
         val enc = Base64.getUrlEncoder().withoutPadding()
         val chunks = (enc.encodeToString(payload) + "." + enc.encodeToString(sig)).chunked(chunk)
-        return chunks.mapIndexed { i, c -> "gs1:${i + 1}/${chunks.size}:$c" }
+        return chunks.mapIndexed { i, c -> "${i + 1}/${chunks.size}:$c" }
     }
 
     private fun cfg(key: KeyPair, store: ListStore? = null, refreshSec: Long = 600, retrySec: Long = 30) =
@@ -52,8 +52,8 @@ class DiscoveryTest {
 
     @Test
     fun dohJoinsSplitQuotedStrings() {
-        val json = """{"Status":0,"Answer":[{"name":"x","type":16,"TTL":60,"data":"\"gs1:1/1:a\" \"bcdef\""}]}"""
-        assertEquals(listOf("gs1:1/1:abcdef"), Doh.parse(json))
+        val json = """{"Status":0,"Answer":[{"name":"x","type":16,"TTL":60,"data":"\"1/1:a\" \"bcdef\""}]}"""
+        assertEquals(listOf("1/1:abcdef"), Doh.parse(json))
     }
 
     @Test
@@ -68,9 +68,9 @@ class DiscoveryTest {
         val out = Doh.queryTxt("_gs.example.com", listOf("http://bad/dns", "http://good/dns"), 1000) { url, _ ->
             urls += url
             if (url.startsWith("http://bad")) throw java.io.IOException("unreachable")
-            """{"Status":0,"Answer":[{"type":16,"data":"\"gs1:1/1:zz\""}]}"""
+            """{"Status":0,"Answer":[{"type":16,"data":"\"1/1:zz\""}]}"""
         }
-        assertEquals(listOf("gs1:1/1:zz"), out)
+        assertEquals(listOf("1/1:zz"), out)
         assertEquals(2, urls.size)
         assertTrue(urls[1].contains("name=_gs.example.com") && urls[1].contains("type=TXT"))
     }
@@ -227,7 +227,7 @@ class DiscoveryTest {
             override fun save(records: List<String>) { saved = records }
         }
         NodeDirectory(cfg(k, store = store), { records(k, nodes(2), exp = 99_999) }, { 1000L }).get()
-        assertTrue(saved.isNotEmpty() && saved.all { it.startsWith("gs1:") })
+        assertTrue(saved.isNotEmpty() && saved.all { ListVerifier.isRecord(it) })
     }
 
     // ---- token manager ----

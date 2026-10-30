@@ -69,8 +69,8 @@ class DnsTest {
 
     @Test
     fun parsesSeveralRecordsAndJoinsTheStringsOfEachOne() {
-        val msg = response(7, "_gs.example.com", listOf(listOf("gs1:1/2:", "abc"), listOf("gs1:2/2:def")))
-        assertEquals(listOf("gs1:1/2:abc", "gs1:2/2:def"), DnsWire.parseTxt(msg, 7))
+        val msg = response(7, "_gs.example.com", listOf(listOf("1/2:", "abc"), listOf("2/2:def")))
+        assertEquals(listOf("1/2:abc", "2/2:def"), DnsWire.parseTxt(msg, 7))
     }
 
     @Test
@@ -148,10 +148,10 @@ class DnsTest {
     fun dotRoundTrip() {
         val ss = dnsTcpServer { q ->
             val id = ((q[0].toInt() and 0xFF) shl 8) or (q[1].toInt() and 0xFF)
-            response(id, "_gs.example.com", listOf(listOf("gs1:1/1:payload")))
+            response(id, "_gs.example.com", listOf(listOf("1/1:payload")))
         }
         try {
-            assertEquals(listOf("gs1:1/1:payload"), Dot.query("127.0.0.1", 853, "_gs.example.com", 2000, plain(ss)))
+            assertEquals(listOf("1/1:payload"), Dot.query("127.0.0.1", 853, "_gs.example.com", 2000, plain(ss)))
         } finally { ss.close() }
     }
 
@@ -183,12 +183,12 @@ class DnsTest {
         val resolvers = listOf(
             "dot:blocked" to TxtResolver { _, _ -> order += "dot"; Thread.sleep(3000); emptyList() },
             "doh:broken" to TxtResolver { _, _ -> order += "doh"; throw java.io.IOException("unreachable") },
-            "doh:good" to TxtResolver { _, _ -> order += "good"; listOf("gs1:1/1:ok") },
+            "doh:good" to TxtResolver { _, _ -> order += "good"; listOf("1/1:ok") },
         )
         val t0 = System.currentTimeMillis()
         val got = Resolvers.race(resolvers, "n", 5000, 50) { it.isNotEmpty() }
         val took = System.currentTimeMillis() - t0
-        assertEquals(listOf("gs1:1/1:ok"), got)
+        assertEquals(listOf("1/1:ok"), got)
         assertTrue("should not wait for the slow resolver, took ${took}ms", took < 1500)
         assertEquals("doh:good", Resolvers.lastWinner)
     }

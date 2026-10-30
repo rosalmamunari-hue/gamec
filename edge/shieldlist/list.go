@@ -1,6 +1,6 @@
 // Package shieldlist builds, signs and verifies the node list that is published as DNS TXT records.
 //
-// Record format: "gs1:<i>/<n>:<chunk>"; the chunks joined are base64url(payload) "." base64url(signature),
+// Record format: "<i>/<n>:<chunk>"; the chunks joined are base64url(payload) "." base64url(signature),
 // where signature is ASN.1 ECDSA P-256 over SHA-256(payload) and payload is
 // {"v":1,"iat":unix,"exp":unix,"nodes":[{"h":host,"p":port,"k":pin}]}.
 // The apps (Android, iOS) implement the verifying side of exactly this format.
@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -112,21 +113,27 @@ func BuildRecords(k *ecdsa.PrivateKey, nodes []Node, now time.Time, valid time.D
 	chunks = append(chunks, body)
 	recs := make([]string, len(chunks))
 	for i, c := range chunks {
-		recs[i] = fmt.Sprintf("gs1:%d/%d:%s", i+1, len(chunks), c)
+		recs[i] = fmt.Sprintf("%d/%d:%s", i+1, len(chunks), c)
 	}
 	return recs, nil
 }
 
+var recordRe = regexp.MustCompile(`^[0-9]{1,3}/[0-9]{1,3}:`)
+
+// IsRecord says whether a TXT value is one of the list's records (the "<i>/<n>:" lead-in). Other TXT values
+// at the same name are none of our business.
+func IsRecord(v string) bool { return recordRe.MatchString(v) }
+
 // VerifyRecords reassembles the records and checks the signature and expiry (what the apps do).
-// Records that do not start with "gs1:" are ignored.
+// Records that do not look like "<i>/<n>:" are ignored.
 func VerifyRecords(records []string, pub *ecdsa.PublicKey, now time.Time) (*Payload, error) {
 	parts := map[int]string{}
 	total := 0
 	for _, r := range records {
-		if !strings.HasPrefix(r, "gs1:") {
+		if !IsRecord(r) {
 			continue
 		}
-		f := strings.SplitN(r[4:], ":", 2)
+		f := strings.SplitN(r, ":", 2)
 		if len(f) != 2 {
 			continue
 		}

@@ -7,7 +7,7 @@ import (
 )
 
 func TestDohHandlerShape(t *testing.T) {
-	recs := []string{"gs1:1/1:abcdefghij"}
+	recs := []string{"1/1:abcdefghij"}
 	srv := httptest.NewServer(dohHandler(recs))
 	defer srv.Close()
 	resp, err := srv.Client().Get(srv.URL + "/?name=x.example&type=TXT")
@@ -24,7 +24,7 @@ func TestDohHandlerShape(t *testing.T) {
 	}
 	json.NewDecoder(resp.Body).Decode(&out)
 	if out.Status != 0 || len(out.Answer) != 1 || out.Answer[0].Type != 16 ||
-		out.Answer[0].Data != `"gs1:1/1:a" "bcdefghij"` {
+		out.Answer[0].Data != `"1/1:abc" "defghij"` {
 		t.Fatalf("unexpected DoH reply: %+v", out)
 	}
 }
