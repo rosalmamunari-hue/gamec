@@ -44,11 +44,15 @@ cd edge
 go run ./cmd/gencert -host <node ip> -out certs/node1          # prints the pin
 go build -o edge .
 ./edge -listen :30800 -origin <origin host:port> \
-       -cert certs/node1/cert.pem -key certs/node1/key.pem -secret <shared secret>
+       -cert certs/node1/cert.pem -key certs/node1/key.pem -secret-file /etc/gamec/secret   # file mode 600
 ```
 
-Run it as a service (systemd `Restart=always`). Useful flags: `-max-per-ip`, `-token-ip-limit`,
-`-token-device-limit`, `-banned <file of device ids>`. The same `-secret` must be on every node.
+Run it as a service (systemd `Restart=always`). The secret must be at least 16 characters; `-secret` also works,
+but anyone on the server can read it from the process list. Without `-cert` the node refuses to start (`-dev`
+runs it on a throwaway key for local tests). Useful flags: `-max-per-ip` (per /64 for IPv6), `-max-conns`,
+`-idle-timeout` (default 10m: a relay with no data either way for that long is closed; raise it if your game
+can sit silent longer, 0 = never), `-token-ip-limit`, `-token-device-limit`, `-banned <file of device ids>`.
+The same secret must be on every node.
 **Make the origin accept connections from the nodes only**, otherwise nothing is hidden.
 
 ## Publishing the node list

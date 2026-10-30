@@ -13,12 +13,14 @@ import (
 	"crypto/x509/pkix"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"math/big"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,12 +30,48 @@ import (
 var (
 	listen   = flag.String("listen", ":30800", "listen address")
 	origin   = flag.String("origin", "127.0.0.1:9000", "hidden origin address")
-	secret   = flag.String("secret", "change-me", "token HMAC secret")
-	certFile = flag.String("cert", "", "TLS cert (PEM); empty = self-signed for dev")
-	keyFile  = flag.String("key", "", "TLS key (PEM)")
-	maxPerIP = flag.Int("max-per-ip", 20, "max concurrent connections per IP")
-	tokenTTL = flag.Duration("token-ttl", 5*time.Minute, "token validity window")
+	secret     = flag.String("secret", "", "token HMAC secret (visible to local users in the process list: prefer -secret-file)")
+	secretFile = flag.String("secret-file", "", "file holding the token HMAC secret")
+	certFile   = flag.String("cert", "", "TLS cert (PEM)")
+	keyFile    = flag.String("key", "", "TLS key (PEM)")
+	dev        = flag.Bool("dev", false, "allow running without -cert, on a throwaway self-signed key (tests only)")
+	maxPerIP   = flag.Int("max-per-ip", 20, "max concurrent connections per IP (per /64 for IPv6)")
+	maxConns   = flag.Int("max-conns", 10000, "max concurrent connections in total")
+	idle       = flag.Duration("idle-timeout", 10*time.Minute, "close a relay after this long with no data either way; 0 = never")
+	tokenTTL   = flag.Duration("token-ttl", 5*time.Minute, "token validity window")
 )
+
+const minSecretLen = 16
+
+// limitKey is what the per-IP limits count: the address, or for IPv6 its /64, since one host usually holds a
+// whole /64 and could otherwise get around the limits by changing address.
+func limitKey(ip string) string {
+	a := net.ParseIP(ip)
+	if a == nil || a.To4() != nil {
+		return ip
+	}
+	return a.Mask(net.CIDRMask(64, 128)).String() + "/64"
+}
+
+// loadSecret takes -secret-file, else -secret, and refuses a missing, default or short one: with a weak secret
+// anyone can make their own tokens and skip every limit.
+func loadSecret() (string, error) {
+	s := *secret
+	if *secretFile != "" {
+		b, err := os.ReadFile(*secretFile)
+		if err != nil {
+			return "", err
+		}
+		s = strings.TrimSpace(string(b))
+	}
+	switch {
+	case s == "":
+		return "", fmt.Errorf("a token secret is required (-secret-file)")
+	case s == "change-me" || len(s) < minSecretLen:
+		return "", fmt.Errorf("the token secret must be at least %d characters and not the example value", minSecretLen)
+	}
+	return s, nil
+}
 
 type limiter struct {
 	mu sync.Mutex
@@ -98,7 +136,8 @@ func selfSigned() tls.Certificate {
 
 func handle(c net.Conn, lim *limiter) {
 	defer c.Close()
-	ip, _, _ := net.SplitHostPort(c.RemoteAddr().String())
+	addr, _, _ := net.SplitHostPort(c.RemoteAddr().String())
+	ip := limitKey(addr)
 	if !lim.acquire(ip) {
 		return
 	}
@@ -123,7 +162,7 @@ func handle(c net.Conn, lim *limiter) {
 		return
 	}
 	if !checkToken(string(buf), time.Now()) {
-		log.Printf("reject %s: bad token", ip)
+		log.Printf("reject %s: bad token", addr)
 		return
 	}
 	c.SetReadDeadline(time.Time{})
@@ -134,23 +173,76 @@ func handle(c net.Conn, lim *limiter) {
 		return
 	}
 	defer up.Close()
+	relay(c, up, *idle)
+}
+
+// relay copies both ways until both are done. A side that finishes sending is half-closed towards the other,
+// so a reply still on its way gets through; an error closes everything. With idle > 0 a relay that carries no
+// data either way for that long is closed, so silent connections cannot hold origin slots forever.
+func relay(client, up net.Conn, idle time.Duration) {
+	var mu sync.Mutex
+	last := time.Now()
+	touch := func() { mu.Lock(); last = time.Now(); mu.Unlock() }
+	quiet := func() time.Duration { mu.Lock(); defer mu.Unlock(); return time.Since(last) }
+	pipe := func(dst, src net.Conn) {
+		buf := make([]byte, 32*1024)
+		for {
+			if idle > 0 {
+				src.SetReadDeadline(time.Now().Add(idle))
+			}
+			n, err := src.Read(buf)
+			if n > 0 {
+				touch()
+				if idle > 0 {
+					dst.SetWriteDeadline(time.Now().Add(idle))
+				}
+				if _, werr := dst.Write(buf[:n]); werr != nil {
+					client.Close()
+					up.Close()
+					return
+				}
+			}
+			if err == nil {
+				continue
+			}
+			if ne, ok := err.(net.Error); ok && ne.Timeout() && quiet() < idle {
+				continue // only this direction was quiet; the other one is busy
+			}
+			if err == io.EOF {
+				if cw, ok := dst.(interface{ CloseWrite() error }); ok && cw.CloseWrite() == nil {
+					return
+				}
+			}
+			client.Close()
+			up.Close()
+			return
+		}
+	}
 	done := make(chan struct{}, 2)
-	go func() { io.Copy(up, c); done <- struct{}{} }()
-	go func() { io.Copy(c, up); done <- struct{}{} }()
+	go func() { pipe(up, client); done <- struct{}{} }()
+	go func() { pipe(client, up); done <- struct{}{} }()
+	<-done
 	<-done
 }
 
 func main() {
 	flag.Parse()
+	s, err := loadSecret()
+	if err != nil {
+		log.Fatal(err)
+	}
+	*secret = s
 	var cert tls.Certificate
-	if *certFile != "" {
-		var err error
+	switch {
+	case *certFile != "":
 		if cert, err = tls.LoadX509KeyPair(*certFile, *keyFile); err != nil {
 			log.Fatal(err)
 		}
-	} else {
+	case *dev:
 		cert = selfSigned()
-		log.Println("using self-signed dev cert")
+		log.Println("using a throwaway self-signed cert (-dev): no app will accept this node")
+	default:
+		log.Fatal("-cert and -key are required (make them with cmd/gencert), or -dev for a local test")
 	}
 	ln, err := tls.Listen("tcp", *listen, &tls.Config{
 		Certificates: []tls.Certificate{cert},
@@ -161,11 +253,28 @@ func main() {
 	}
 	fmt.Println("edge listening on", *listen, "-> origin", *origin)
 	lim := &limiter{n: map[string]int{}}
+	slots := make(chan struct{}, *maxConns)
+	var backoff time.Duration
 	for {
 		c, err := ln.Accept()
 		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				log.Fatal(err)
+			}
+			// e.g. out of file descriptors: wait instead of spinning, like net/http
+			if backoff = min(max(2*backoff, 5*time.Millisecond), time.Second); backoff == time.Second {
+				log.Printf("accept: %v", err)
+			}
+			time.Sleep(backoff)
 			continue
 		}
-		go handle(c, lim)
+		backoff = 0
+		select {
+		case slots <- struct{}{}:
+		default:
+			c.Close() // full: refuse at once rather than queue
+			continue
+		}
+		go func() { defer func() { <-slots }(); handle(c, lim) }()
 	}
 }
