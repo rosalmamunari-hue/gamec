@@ -475,7 +475,8 @@ func (s *Server) renderCluster(w http.ResponseWriter, r *http.Request, id, flash
 		flash = r.URL.Query().Get("ok")
 	}
 	data := clusterPageData{Row: s.clusterRow(st, c)}
-	if c.Sealed && !s.Vault.Sealed() {
+	// the key is a secret like the others: read-only accounts see that the list is sealed, not the key
+	if sess, _ := r.Context().Value(ctxKey{}).(*auth.Session); c.Sealed && !s.Vault.Sealed() && sess != nil && sess.Role == auth.Admin {
 		data.SealKey, _, _ = s.Vault.Get(engine.SealKeyName(id))
 	}
 	s.render(w, r, "cluster.html", page{Title: c.Name, Flash: flash, Error: errMsg, Data: data}, status)

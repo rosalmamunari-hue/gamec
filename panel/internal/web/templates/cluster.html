@@ -149,7 +149,7 @@
   <dl>
     <dt>去哪些网域读名单</dt><dd>{{range $c.Targets}}<code>{{.Name}}</code> {{end}}</dd>
     <dt>验证名单真假的公钥（公开的，不是秘密）</dt><dd><code class="wrap">{{$c.PublicKey}}</code></dd>
-    {{if $c.Sealed}}<dt>名单解密密钥（App 要用它才读得懂名单）</dt><dd>{{if .Data.SealKey}}<code class="wrap">{{.Data.SealKey}}</code>{{else}}<span class="muted">解锁保险库后才显示。</span>{{end}}</dd>{{end}}
+    {{if $c.Sealed}}<dt>名单解密密钥（App 要用它才读得懂名单）</dt><dd>{{if .Data.SealKey}}<code class="wrap">{{.Data.SealKey}}</code>{{else if $p.Admin}}<span class="muted">解锁保险库后才显示。</span>{{else}}<span class="muted">只有管理员能看到。</span>{{end}}</dd>{{end}}
   </dl>
   {{if $p.Admin}}
   <h3>加密名单</h3>

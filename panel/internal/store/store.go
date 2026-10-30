@@ -20,6 +20,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"gamec/panel/internal/atomicfile"
 )
 
 var (
@@ -343,11 +345,7 @@ func (s *Store) Mutate(fn func(*State) error) error {
 	if err != nil {
 		return err
 	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, s.path); err != nil {
+	if err := atomicfile.Write(s.path, b, 0o600); err != nil {
 		return err
 	}
 	s.st = next

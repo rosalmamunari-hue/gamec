@@ -16,6 +16,8 @@ import (
 	"sync"
 
 	"golang.org/x/crypto/scrypt"
+
+	"gamec/panel/internal/atomicfile"
 )
 
 var (
@@ -215,11 +217,7 @@ func (v *Vault) save() error {
 	if err != nil {
 		return err
 	}
-	tmp := v.path + ".tmp"
-	if err := os.WriteFile(tmp, out, 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, v.path); err != nil {
+	if err := atomicfile.Write(v.path, out, 0o600); err != nil {
 		return fmt.Errorf("replace vault file: %w", err)
 	}
 	v.hdr = h

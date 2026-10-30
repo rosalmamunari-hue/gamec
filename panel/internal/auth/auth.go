@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/argon2"
+
+	"gamec/panel/internal/atomicfile"
 )
 
 // argon2id cost; tests lower it.
@@ -173,11 +175,7 @@ func (u *Users) save() error {
 	if err != nil {
 		return err
 	}
-	tmp := u.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, u.path)
+	return atomicfile.Write(u.path, b, 0o600)
 }
 
 func (u *Users) find(name string) *User {

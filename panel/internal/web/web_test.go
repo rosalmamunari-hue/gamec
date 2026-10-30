@@ -705,6 +705,9 @@ func TestSealingTheListMakesAKeyShowsItAndCanBeSwitchedOff(t *testing.T) {
 	if _, body, _ := c.get("/cluster/" + cl.ID); !strings.Contains(html.UnescapeString(body), key) {
 		t.Fatal("the cluster page does not show the key the app needs")
 	}
+	if _, body, _ := e.viewer().get("/cluster/" + cl.ID); strings.Contains(html.UnescapeString(body), key) {
+		t.Fatal("a read-only account was shown the list key")
+	}
 	if st, _, _ := c.post("/cluster/"+cl.ID+"/seal", url.Values{"csrf": {c.csrf()}, "seal": {"0"}}, nil); st != http.StatusSeeOther || e.st.Snapshot().Cluster(cl.ID).Sealed {
 		t.Fatal("seal off did not work")
 	}
