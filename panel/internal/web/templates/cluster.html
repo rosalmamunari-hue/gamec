@@ -3,14 +3,14 @@
 {{$row := .Data.Row}}
 {{$c := $row.C}}
 
-<p class="muted">{{if $c.Origin}}Forwards to {{$c.Origin}}. {{end}}Each signed list is valid {{$c.ValidDays}} days and is renewed {{$c.RenewBeforeDays}} days before it expires.</p>
+<p class="muted">{{if $c.Origin}}轉發到 {{$c.Origin}}。{{end}}每份簽名名單有效 {{$c.ValidDays}} 天，到期前 {{$c.RenewBeforeDays}} 天續期。</p>
 {{range $row.Alerts}}<p class="alert">&#9888; {{.}}</p>{{end}}
 {{if $row.Note}}<p class="muted">{{$row.Note}}</p>{{end}}
 
 <section class="card">
-  <h2>Nodes <span class="pill {{if eq $row.OK $row.All}}ok{{else if eq $row.OK 0}}bad{{else}}warn{{end}}">{{$row.OK}} / {{$row.All}} ok</span></h2>
+  <h2>節點 <span class="pill {{if eq $row.OK $row.All}}ok{{else if eq $row.OK 0}}bad{{else}}warn{{end}}">{{$row.OK}} / {{$row.All}} 正常</span></h2>
   <table>
-    <tr><th>Name</th><th>Address</th><th>Status</th>{{if $p.Admin}}<th>Actions</th>{{end}}</tr>
+    <tr><th>名稱</th><th>位址</th><th>狀態</th>{{if $p.Admin}}<th>操作</th>{{end}}</tr>
     {{range $row.Nodes}}
     <tr class="node {{.Status}}">
       <td>{{.N.Name}}</td>
@@ -21,17 +21,17 @@
         <form method="post" action="/cluster/{{$c.ID}}/node/{{.N.ID}}/enable" class="inline">
           <input type="hidden" name="csrf" value="{{$p.CSRF}}">
           <input type="hidden" name="enabled" value="{{if .N.Enabled}}0{{else}}1{{end}}">
-          <button>{{if .N.Enabled}}Switch off{{else}}Switch on{{end}}</button>
+          <button>{{if .N.Enabled}}關閉{{else}}開啟{{end}}</button>
         </form>
         <form method="post" action="/cluster/{{$c.ID}}/node/{{.N.ID}}/pause" class="inline">
           <input type="hidden" name="csrf" value="{{$p.CSRF}}">
-          <input name="minutes" value="30" size="3" aria-label="minutes">
-          <button title="take it out of the list for a while; it returns by itself">Pause (min)</button>
+          <input name="minutes" value="30" size="3" aria-label="分鐘">
+          <button title="暫時把它從名單中移除，時間到會自動回來">暫停（分鐘）</button>
         </form>
-        <a class="btn" href="/cluster/{{$c.ID}}/node/{{.N.ID}}">Manage</a>
+        <a class="btn" href="/cluster/{{$c.ID}}/node/{{.N.ID}}">管理</a>
         <form method="post" action="/cluster/{{$c.ID}}/node/{{.N.ID}}/delete" class="inline">
           <input type="hidden" name="csrf" value="{{$p.CSRF}}">
-          <button class="danger">Delete</button>
+          <button class="danger">刪除</button>
         </form>
       </td>
       {{end}}
@@ -39,87 +39,87 @@
     {{end}}
   </table>
   {{if $p.Admin}}
-  <form method="post" action="/cluster/{{$c.ID}}/probe" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button>Probe now</button></form>
+  <form method="post" action="/cluster/{{$c.ID}}/probe" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button>立即探測</button></form>
   <form method="post" action="/cluster/{{$c.ID}}/upgrade-all" class="inline">
     <input type="hidden" name="csrf" value="{{$p.CSRF}}">
-    <input name="tag" placeholder="v0.2.0" size="9" required aria-label="release">
-    <button title="one node at a time; stops at the first problem">Upgrade all nodes (SSH)</button>
+    <input name="tag" placeholder="v0.2.0" size="9" required aria-label="版本">
+    <button title="一次升級一個節點；遇到第一個問題就停止">升級所有節點（SSH）</button>
   </form>
   <details>
-    <summary>Add a node</summary>
+    <summary>新增節點</summary>
     <form method="post" action="/cluster/{{$c.ID}}/node" class="stack">
       <input type="hidden" name="csrf" value="{{$p.CSRF}}">
-      <label>Name <input name="name" required></label>
-      <label>Host (IP or DNS name) <input name="host" required></label>
-      <label>Port <input name="port" value="30800" required></label>
-      <label>Pin (from <code>gencert</code>) <input name="pin" size="48" required></label>
-      <button>Add node</button>
+      <label>名稱 <input name="name" required></label>
+      <label>主機（IP 或網域） <input name="host" required></label>
+      <label>連接埠 <input name="port" value="30800" required></label>
+      <label>Pin（由 <code>gencert</code> 取得） <input name="pin" size="48" required></label>
+      <button>新增節點</button>
     </form>
   </details>
   {{end}}
 </section>
 
 <section class="card">
-  <h2>Publishing</h2>
+  <h2>發布</h2>
   {{if $c.Last.At.IsZero}}
-    <p class="muted">Nothing has been published for this cluster yet.</p>
+    <p class="muted">這個集群還沒有發布過。</p>
   {{else}}
-    <p>Last published {{ago $c.Last.At}} (<span class="muted">{{ts $c.Last.At}} UTC</span>): {{$c.Last.Result}}.<br>
-       Valid until {{ts (unixTime $c.Last.Exp)}} UTC ({{until $c.Last.Exp}}).</p>
+    <p>最近一次發布於 {{ago $c.Last.At}}（<span class="muted">{{ts $c.Last.At}} UTC</span>）：{{$c.Last.Result}}。<br>
+       有效期至 {{ts (unixTime $c.Last.Exp)}} UTC（{{until $c.Last.Exp}}）。</p>
     <ul>{{range $c.Last.Nodes}}<li><code>{{.}}</code></li>{{end}}</ul>
   {{end}}
   {{if $c.Last.Manual}}
-    <p class="alert">Paste these as separate TXT records at the manual target(s), then they are live:</p>
+    <p class="alert">請把下面每一行當作獨立的 TXT 記錄貼到手動目標上，貼完即生效：</p>
     <pre>{{range $c.Last.Records}}{{.}}
 {{end}}</pre>
   {{end}}
   {{if $p.Admin}}
   <form method="post" action="/cluster/{{$c.ID}}/publish" class="inline">
     <input type="hidden" name="csrf" value="{{$p.CSRF}}">
-    <button class="primary">Sign and publish now</button>
+    <button class="primary">立即簽名並發布</button>
   </form>
   <form method="post" action="/cluster/{{$c.ID}}/auto" class="inline">
     <input type="hidden" name="csrf" value="{{$p.CSRF}}">
     <input type="hidden" name="auto" value="{{if $c.AutoPublish}}0{{else}}1{{end}}">
-    <button>{{if $c.AutoPublish}}Turn automatic publishing off{{else}}Turn automatic publishing on{{end}}</button>
+    <button>{{if $c.AutoPublish}}關閉自動發布{{else}}開啟自動發布{{end}}</button>
   </form>
-  <p class="muted">Automatic publishing removes a node that keeps failing, adds one that has proved itself, and renews the list before it expires.</p>
+  <p class="muted">自動發布會移除持續失敗的節點、加入已證明穩定的節點，並在名單到期前自動續期。</p>
   {{end}}
 </section>
 
 <section class="card">
-  <h2>DNS targets</h2>
+  <h2>DNS 目標</h2>
   <table>
-    <tr><th>Provider</th><th>Name</th><th>Zone</th><th>Credentials</th>{{if $p.Admin}}<th></th>{{end}}</tr>
+    <tr><th>服務商</th><th>名稱</th><th>Zone</th><th>憑證</th>{{if $p.Admin}}<th></th>{{end}}</tr>
     {{range $i, $t := $c.Targets}}
     <tr><td>{{$t.Provider}}</td><td><code>{{$t.Name}}</code></td><td>{{$t.Zone}}</td><td>{{if $t.CredRef}}{{$t.CredRef}}{{else}}-{{end}}</td>
-      {{if $p.Admin}}<td><form method="post" action="/cluster/{{$c.ID}}/target/{{$i}}/delete" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button class="danger">Remove</button></form></td>{{end}}
+      {{if $p.Admin}}<td><form method="post" action="/cluster/{{$c.ID}}/target/{{$i}}/delete" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button class="danger">移除</button></form></td>{{end}}
     </tr>
     {{end}}
   </table>
   {{if $p.Admin}}
   <details>
-    <summary>Add a DNS target</summary>
+    <summary>新增 DNS 目標</summary>
     <form method="post" action="/cluster/{{$c.ID}}/target" class="stack">
       <input type="hidden" name="csrf" value="{{$p.CSRF}}">
-      <label>Provider
+      <label>服務商
         <select name="provider"><option>manual</option><option>cloudflare</option><option>spaceship</option><option>aliyun</option></select></label>
-      <label>Zone (the registered domain) <input name="zone" placeholder="example.com" required></label>
-      <label>Record name <input name="dns_name" placeholder="_gs.example.com" required></label>
-      <label>Credentials name (see "DNS credentials"; not needed for manual) <input name="cred_ref"></label>
-      <button>Add target</button>
+      <label>Zone（已註冊的網域） <input name="zone" placeholder="example.com" required></label>
+      <label>記錄名稱 <input name="dns_name" placeholder="_gs.example.com" required></label>
+      <label>憑證名稱（見「DNS 憑證」；manual 不需要） <input name="cred_ref"></label>
+      <button>新增目標</button>
     </form>
   </details>
   {{end}}
 </section>
 
 <section class="card">
-  <h2>For the app</h2>
-  <p>Put these in the app's <code>DiscoveryConfig</code>:</p>
+  <h2>給 App 使用</h2>
+  <p>把這些填入 App 的 <code>DiscoveryConfig</code>：</p>
   <dl>
-    <dt>DNS name</dt><dd>{{range $c.Targets}}<code>{{.Name}}</code> {{end}}</dd>
-    <dt>Public key</dt><dd><code class="wrap">{{$c.PublicKey}}</code></dd>
+    <dt>DNS 名稱</dt><dd>{{range $c.Targets}}<code>{{.Name}}</code> {{end}}</dd>
+    <dt>公鑰</dt><dd><code class="wrap">{{$c.PublicKey}}</code></dd>
   </dl>
-  <p class="muted">Different channels use different names and keys, so each channel's build embeds its own cluster's values.</p>
+  <p class="muted">不同渠道使用不同的名稱與金鑰，所以每個渠道的安裝包要內建自己集群的值。</p>
 </section>
 {{template "foot" .}}

@@ -1,5 +1,5 @@
 {{define "head"}}<!doctype html>
-<html lang="en">
+<html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -11,19 +11,19 @@
   <a class="brand" href="/">gamec panel</a>
   {{if .User}}
   <nav>
-    <a href="/">Clusters</a>
-    {{if .Admin}}<a href="/secrets">DNS credentials</a><a href="/ssh">SSH management</a><a href="/egress">Egress</a>{{end}}
-    <a href="/audit">Audit log</a>
+    <a href="/">集群</a>
+    {{if .Admin}}<a href="/secrets">DNS 憑證</a><a href="/ssh">SSH 管理</a><a href="/egress">出口跳板機</a>{{end}}
+    <a href="/audit">稽核日誌</a>
     <form method="post" action="/logout" class="inline">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <span class="who">{{.User}}{{if .Admin}} (admin){{else}} (read-only){{end}}</span>
-      <button class="link">Sign out</button>
+      <span class="who">{{.User}}{{if .Admin}} （管理員）{{else}} （唯讀）{{end}}</span>
+      <button class="link">登出</button>
     </form>
   </nav>
   {{end}}
 </header>
 <main>
-{{if .Sealed}}<div class="banner warn">The vault is <b>sealed</b>: nothing can be signed or published and automatic renewal is paused.{{if .Admin}} <a href="/unseal">Unseal it</a>.{{end}}</div>{{end}}
+{{if .Sealed}}<div class="banner warn">保險庫目前是<b>封存</b>狀態：無法簽名或發布，自動續期也已暫停。{{if .Admin}} <a href="/unseal">前往解封</a>。{{end}}</div>{{end}}
 {{if .Flash}}<div class="banner ok">{{.Flash}}</div>{{end}}
 {{if .Error}}<div class="banner err">{{.Error}}</div>{{end}}
 <h1>{{.Title}}</h1>

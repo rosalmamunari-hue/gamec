@@ -10,34 +10,34 @@
 </section>
 
 <section class="card">
-  <h2>SSH settings</h2>
-  <p class="muted">The panel logs in as a restricted account with its own key and may run only <code>gamec-nodectl</code>. Prepare each server once with the script from <a href="/ssh">SSH management</a>.</p>
+  <h2>SSH 設定</h2>
+  <p class="muted">面板用自己的金鑰以受限帳號登入，只能執行 <code>gamec-nodectl</code>。每台伺服器要先用 <a href="/ssh">SSH 管理</a> 頁的腳本準備一次。</p>
   <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/ssh-settings" class="stack">
     <input type="hidden" name="csrf" value="{{$p.CSRF}}">
-    <label>Account <input name="ssh_user" value="{{$n.SSHUser}}" placeholder="gamec-ops"></label>
-    <label>SSH port (blank = 22) <input name="ssh_port" value="{{if $n.SSHPort}}{{$n.SSHPort}}{{end}}" size="6"></label>
-    <label>Service name (blank = gamec-edge) <input name="unit" value="{{$n.Unit}}" placeholder="gamec-edge"></label>
-    <button>Save</button>
+    <label>帳號 <input name="ssh_user" value="{{$n.SSHUser}}" placeholder="gamec-ops"></label>
+    <label>SSH 連接埠（留空 = 22） <input name="ssh_port" value="{{if $n.SSHPort}}{{$n.SSHPort}}{{end}}" size="6"></label>
+    <label>服務名稱（留空 = gamec-edge） <input name="unit" value="{{$n.Unit}}" placeholder="gamec-edge"></label>
+    <button>儲存</button>
   </form>
 </section>
 
 {{if $n.SSHUser}}
 <section class="card">
-  <h2>Host key</h2>
-  {{if $n.HostKey}}<p>Confirmed: <code class="wrap">{{$n.HostKey}}</code></p>{{else}}<p class="alert">Not confirmed yet. Nothing is sent to this server until you confirm its key.</p>{{end}}
+  <h2>主機金鑰</h2>
+  {{if $n.HostKey}}<p>已確認：<code class="wrap">{{$n.HostKey}}</code></p>{{else}}<p class="alert">尚未確認。在你確認它的金鑰之前，不會向這台伺服器送出任何東西。</p>{{end}}
   {{if .Data.Fingerprint}}
-    {{if .Data.KeyChanged}}<p class="alert"><b>This is different from the key you confirmed before.</b> Either the server was reinstalled or someone is intercepting the connection. Only continue if you know it was reinstalled.</p>{{end}}
-    <p>The server presents (<code>{{.Data.KeyType}}</code>):</p>
+    {{if .Data.KeyChanged}}<p class="alert"><b>這和你之前確認的金鑰不一樣。</b>要麼伺服器重新安裝過，要麼有人在攔截連線。只有確定是重新安裝時才繼續。</p>{{end}}
+    <p>伺服器出示的金鑰（<code>{{.Data.KeyType}}</code>）：</p>
     <p><code class="wrap">{{.Data.Fingerprint}}</code></p>
-    <p class="muted">Compare it with the output on the server of <code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</code> (the prepare script prints it too). Confirm only if they are the same.</p>
+    <p class="muted">請和在伺服器上執行 <code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</code> 的輸出核對（準備腳本也會印出來）。完全一致才確認。</p>
     <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/hostkey" class="inline">
       <input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="action" value="trust"><input type="hidden" name="fingerprint" value="{{.Data.Fingerprint}}">
-      <button class="primary">They match: trust this key</button>
+      <button class="primary">一致：信任這把金鑰</button>
     </form>
   {{else}}
     <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/hostkey" class="inline">
       <input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="action" value="fetch">
-      <button>{{if $n.HostKey}}Check the key again{{else}}Fetch the server's key{{end}}</button>
+      <button>{{if $n.HostKey}}重新檢查金鑰{{else}}取得伺服器金鑰{{end}}</button>
     </form>
   {{end}}
 </section>
@@ -45,37 +45,37 @@
 
 {{if and $n.SSHUser $n.HostKey}}
 <section class="card">
-  <h2>Manage over SSH</h2>
-  <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/check" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button>Check status and logs</button></form>
+  <h2>通過 SSH 管理</h2>
+  <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/check" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button>查看狀態與日誌</button></form>
 
   {{with .Data.Status}}
   <table>
-    <tr><th>Service</th><td>{{.Unit}}: {{.Active}} ({{.Sub}}) since {{.Since}}</td></tr>
-    <tr><th>Program</th><td><code class="wrap">{{.SHA256}}</code>{{if .HasBackup}} &middot; previous version kept{{end}}</td></tr>
-    <tr><th>Memory / files / threads</th><td>{{.RSSKB}} kB / {{.FDs}} / {{.Threads}}</td></tr>
-    <tr><th>Server</th><td>load {{.Load1}}, {{.MemAvail}} MB available</td></tr>
-    <tr><th>nodectl</th><td>version {{.Version}}</td></tr>
+    <tr><th>服務</th><td>{{.Unit}}：{{.Active}}（{{.Sub}}），自 {{.Since}}</td></tr>
+    <tr><th>程式</th><td><code class="wrap">{{.SHA256}}</code>{{if .HasBackup}} &middot; 已保留上一版{{end}}</td></tr>
+    <tr><th>記憶體／檔案／執行緒</th><td>{{.RSSKB}} kB / {{.FDs}} / {{.Threads}}</td></tr>
+    <tr><th>伺服器</th><td>負載 {{.Load1}}，可用記憶體 {{.MemAvail}} MB</td></tr>
+    <tr><th>nodectl</th><td>版本 {{.Version}}</td></tr>
   </table>
   {{end}}
   {{if .Data.Logs}}<pre>{{.Data.Logs}}</pre>{{end}}
   {{if .Data.Result}}<p>{{.Data.Result}}</p>{{end}}
 
-  <h3>Service</h3>
+  <h3>服務</h3>
   {{range $verb := list "restart" "start" "stop"}}
-  <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/ctl" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="verb" value="{{$verb}}"><button{{if eq $verb "stop"}} class="danger"{{end}}>{{$verb}}</button></form>
+  <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/ctl" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="verb" value="{{$verb}}"><button{{if eq $verb "stop"}} class="danger"{{end}}>{{if eq $verb "restart"}}重啟{{else if eq $verb "start"}}啟動{{else}}停止{{end}}</button></form>
   {{end}}
   <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/stop-for" class="inline">
     <input type="hidden" name="csrf" value="{{$p.CSRF}}">
     <input name="minutes" value="1" size="3" aria-label="minutes">
-    <button title="stops the service, and the node starts it again by itself">Stop for (minutes), then start again</button>
+    <button title="停止服務，時間到節點會自己再啟動">停止指定分鐘數，然後再啟動</button>
   </form>
 
-  <h3>Upgrade</h3>
-  <p class="muted">Downloads the release, checks it against the release's checksums, sends it, installs it, and requires the node to pass its checks. If it does not, the previous version is put back.</p>
+  <h3>升級</h3>
+  <p class="muted">下載該版本，用發布的校驗碼檢查，傳送、安裝，並要求節點通過檢查。若沒通過，會自動換回上一個版本。</p>
   <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/upgrade" class="inline">
     <input type="hidden" name="csrf" value="{{$p.CSRF}}">
     <input name="tag" placeholder="v0.2.0" size="10" required>
-    <button>Upgrade this node</button>
+    <button>升級這個節點</button>
   </form>
 </section>
 {{end}}

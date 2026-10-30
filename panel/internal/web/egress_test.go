@@ -87,7 +87,7 @@ func TestEgressSetThenHostKeyMustBeConfirmedAndNothingGoesDirect(t *testing.T) {
 		t.Fatal("not stored")
 	}
 	_, body, _ = a.post("/egress/test", url.Values{"csrf": {a.csrf()}}, nil)
-	if !strings.Contains(body, "reachable") || len(j.dials) != 1 || j.dials[0] != "10.1.1.1:30800" {
+	if !strings.Contains(body, "可連通") || len(j.dials) != 1 || j.dials[0] != "10.1.1.1:30800" {
 		t.Fatalf("dials=%v", j.dials)
 	}
 }

@@ -1,25 +1,25 @@
 {{template "head" .}}
 <section class="card">
-  <p class="muted">The panel manages nodes over SSH with one key of its own, as a restricted account that may run only <code>gamec-nodectl</code> (status, logs, start/stop/restart, install a checked version, roll back). It never needs a root password.</p>
+  <p class="muted">面板用自己的一把金鑰，通過 SSH 管理節點，使用的是受限帳號，只能執行 <code>gamec-nodectl</code>（查看狀態、日誌、啟動／停止／重啟、安裝經過校驗的版本、回滾）。完全不需要 root 密碼。</p>
   {{if .Data.HasKey}}
-    <h2>The panel's public key</h2>
+    <h2>面板的公鑰</h2>
     <p><code class="wrap">{{.Data.PublicLine}}</code></p>
   {{else}}
-    <p class="alert">The panel has no SSH key yet. Create one on the panel's server with <code>panel ssh-keygen</code>.</p>
+    <p class="alert">面板還沒有 SSH 金鑰。請在面板所在的伺服器上執行 <code>panel ssh-keygen</code> 建立。</p>
   {{end}}
 </section>
 
 {{if .Data.HasKey}}
 <section class="card">
-  <h2>Prepare a server</h2>
-  <p>Generates a script for you to read and run <b>once, as root</b>, on each node's server. It creates the restricted account, allows only the panel's key, installs <code>gamec-nodectl</code> (checked against its checksum) and the one sudo rule.</p>
+  <h2>準備伺服器</h2>
+  <p>產生一份腳本，請你先閱讀，再在每個節點的伺服器上以 <b>root 執行一次</b>。它會建立受限帳號、只允許面板的金鑰、安裝 <code>gamec-nodectl</code>（會用校驗碼檢查），並加入那一條 sudo 規則。</p>
   <form method="post" action="/ssh" class="stack">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
-    <label>Release that contains nodectl <input name="tag" placeholder="v0.2.0" required></label>
-    <label>Only allow logins from this address (the panel's own address; recommended) <input name="from" placeholder="203.0.113.9"></label>
-    <button class="primary">Generate the script</button>
+    <label>包含 nodectl 的版本 <input name="tag" placeholder="v0.2.0" required></label>
+    <label>只允許從這個位址登入（面板自己的位址；建議填寫） <input name="from" placeholder="203.0.113.9"></label>
+    <button class="primary">產生腳本</button>
   </form>
-  {{if .Data.Script}}<h2>Script</h2><pre>{{.Data.Script}}</pre>{{end}}
+  {{if .Data.Script}}<h2>腳本</h2><pre>{{.Data.Script}}</pre>{{end}}
 </section>
 {{end}}
 {{template "foot" .}}

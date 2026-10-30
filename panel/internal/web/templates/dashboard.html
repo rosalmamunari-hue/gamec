@@ -1,15 +1,15 @@
 {{template "head" .}}
-{{if .Admin}}<p><a class="btn" href="/cluster/new">New cluster</a></p>{{end}}
-{{if not .Data}}<p class="muted">No clusters yet.{{if .Admin}} Create one, or import an existing one with <code>panel import-cluster</code>.{{end}}</p>{{end}}
+{{if .Admin}}<p><a class="btn" href="/cluster/new">新增集群</a></p>{{end}}
+{{if not .Data}}<p class="muted">目前還沒有集群。{{if .Admin}}可以建立一個，或用 <code>panel import-cluster</code> 匯入既有的集群。{{end}}</p>{{end}}
 <div class="grid">
 {{range .Data}}
   <section class="card">
     <h2><a href="/cluster/{{.C.ID}}">{{.C.Name}}</a></h2>
-    {{if .C.Origin}}<p class="muted">origin {{.C.Origin}}</p>{{end}}
+    {{if .C.Origin}}<p class="muted">源站 {{.C.Origin}}</p>{{end}}
     <p>
-      <span class="pill {{if eq .OK .All}}ok{{else if eq .OK 0}}bad{{else}}warn{{end}}">{{.OK}} / {{.All}} nodes ok</span>
-      <span class="pill">list: {{.Expiry}}</span>
-      <span class="pill">{{if .C.AutoPublish}}auto-publish on{{else}}auto-publish off{{end}}</span>
+      <span class="pill {{if eq .OK .All}}ok{{else if eq .OK 0}}bad{{else}}warn{{end}}">{{.OK}} / {{.All}} 個節點正常</span>
+      <span class="pill">名單：{{.Expiry}}</span>
+      <span class="pill">{{if .C.AutoPublish}}自動發布：開{{else}}自動發布：關{{end}}</span>
     </p>
     {{range .Alerts}}<p class="alert">&#9888; {{.}}</p>{{end}}
     {{if .Note}}<p class="muted">{{.Note}}</p>{{end}}

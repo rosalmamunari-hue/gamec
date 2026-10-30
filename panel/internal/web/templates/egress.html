@@ -1,67 +1,67 @@
 {{template "head" .}}
 {{$p := .}}
 <section class="card">
-  <p class="muted">Every connection the panel makes to a node (SSH, status checks, host keys) can be sent through one jump host, so the nodes see <b>its</b> address and never the panel's. It uses SSH forwarding: nothing extra to install on the jump host, and its account cannot open a shell or run a command. If the jump host cannot be used, connections <b>fail</b>; they never quietly go direct.</p>
+  <p class="muted">面板連到節點的所有連線（SSH、狀態檢查、讀取主機金鑰）都可以經過同一台跳板機，這樣節點看到的是<b>跳板機</b>的位址，而不是面板的。它使用 SSH 轉發：跳板機上不用額外安裝任何東西，它的帳號也不能開啟 shell 或執行指令。若跳板機無法使用，連線會<b>失敗</b>，絕不會悄悄改成直連。</p>
 </section>
 
 <section class="card">
-  <h2>Egress host</h2>
+  <h2>出口跳板機</h2>
   {{if .Data.Cfg}}
     <p><code>{{.Data.Cfg.User}}@{{.Data.Cfg.Addr}}</code></p>
-    {{if .Data.Cfg.HostKey}}<p>Host key confirmed: <code class="wrap">{{.Data.Cfg.HostKey}}</code></p>
-    {{else}}<p class="alert">Host key not confirmed: nothing is sent to any node until it is.</p>{{end}}
+    {{if .Data.Cfg.HostKey}}<p>主機金鑰已確認：<code class="wrap">{{.Data.Cfg.HostKey}}</code></p>
+    {{else}}<p class="alert">主機金鑰尚未確認：確認之前不會向任何節點送出東西。</p>{{end}}
   {{else}}
-    <p class="muted">Not configured: the panel connects to the nodes directly, so they see the panel's own address.</p>
+    <p class="muted">尚未設定：面板直接連線到節點，所以節點會看到面板自己的位址。</p>
   {{end}}
   <form method="post" action="/egress/set" class="stack">
     <input type="hidden" name="csrf" value="{{$p.CSRF}}">
-    <label>Address (host or host:port, SSH port defaults to 22) <input name="addr" value="{{if .Data.Cfg}}{{.Data.Cfg.Addr}}{{end}}" required></label>
-    <label>Account <input name="user" value="{{if .Data.Cfg}}{{.Data.Cfg.User}}{{else}}gamec-jump{{end}}" required></label>
-    <button>Save</button>
+    <label>位址（主機或 主機:連接埠，SSH 預設 22） <input name="addr" value="{{if .Data.Cfg}}{{.Data.Cfg.Addr}}{{end}}" required></label>
+    <label>帳號 <input name="user" value="{{if .Data.Cfg}}{{.Data.Cfg.User}}{{else}}gamec-jump{{end}}" required></label>
+    <button>儲存</button>
   </form>
   {{if .Data.Cfg}}
-  <form method="post" action="/egress/remove" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button class="danger">Remove (connect directly again)</button></form>
+  <form method="post" action="/egress/remove" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button class="danger">移除（改回直連）</button></form>
   {{end}}
 </section>
 
 {{if .Data.Cfg}}
 <section class="card">
-  <h2>Host key</h2>
+  <h2>主機金鑰</h2>
   {{if .Data.Fingerprint}}
-    {{if .Data.KeyChanged}}<p class="alert"><b>Different from the key you confirmed before.</b> Either the machine was reinstalled or someone is intercepting the connection.</p>{{end}}
-    <p>The host presents (<code>{{.Data.KeyType}}</code>): <code class="wrap">{{.Data.Fingerprint}}</code></p>
-    <p class="muted">Compare it with the ED25519 line printed when you ran the script on that machine. Confirm only if they are the same.</p>
+    {{if .Data.KeyChanged}}<p class="alert"><b>和你之前確認的金鑰不一樣。</b>要麼這台機器重新安裝過，要麼有人在攔截連線。</p>{{end}}
+    <p>主機出示的金鑰（<code>{{.Data.KeyType}}</code>）：<code class="wrap">{{.Data.Fingerprint}}</code></p>
+    <p class="muted">請和你在那台機器上執行腳本時印出的 ED25519 那一行核對。完全一致才確認。</p>
     <form method="post" action="/egress/hostkey" class="inline">
       <input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="action" value="trust"><input type="hidden" name="fingerprint" value="{{.Data.Fingerprint}}">
-      <button class="primary">They match: trust this key</button>
+      <button class="primary">一致：信任這把金鑰</button>
     </form>
   {{else}}
-    <form method="post" action="/egress/hostkey" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="action" value="fetch"><button>{{if .Data.Cfg.HostKey}}Check the key again{{else}}Fetch the host's key{{end}}</button></form>
+    <form method="post" action="/egress/hostkey" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="action" value="fetch"><button>{{if .Data.Cfg.HostKey}}重新檢查金鑰{{else}}取得主機金鑰{{end}}</button></form>
   {{end}}
 </section>
 
 <section class="card">
-  <h2>Prepare the jump host</h2>
+  <h2>準備跳板機</h2>
   {{if .Data.HasKey}}
-  <p>Generates a script to read and run <b>once, as root</b>, on the jump host. It creates the account and allows the panel's key to forward connections <b>only</b> to the addresses of your nodes (the service port and, where SSH is set up, the SSH port). Run it again whenever you add a node.</p>
+  <p>產生一份腳本，請先閱讀，再在跳板機上以 <b>root 執行一次</b>。它會建立帳號，並讓面板的金鑰<b>只能</b>轉發到你的節點位址（服務連接埠，以及已設定 SSH 的節點的 SSH 連接埠）。新增節點後要重新產生並再執行一次。</p>
   <form method="post" action="/egress/script" class="stack">
     <input type="hidden" name="csrf" value="{{$p.CSRF}}">
-    <label>Only allow logins from this address (the panel's own address; recommended) <input name="from" placeholder="203.0.113.9"></label>
-    <button class="primary">Generate the script</button>
+    <label>只允許從這個位址登入（面板自己的位址；建議填寫） <input name="from" placeholder="203.0.113.9"></label>
+    <button class="primary">產生腳本</button>
   </form>
   {{if .Data.Script}}<pre>{{.Data.Script}}</pre>
-  <p class="muted">On every node, allow SSH and the service port only from the <b>jump host's</b> address (and put that address, not the panel's, in the node's <code>from=</code>).</p>{{end}}
-  {{else}}<p class="alert">The panel has no SSH key yet. Create one with <code>panel ssh-keygen</code>.</p>{{end}}
+  <p class="muted">在每個節點上，SSH 和服務連接埠只放行<b>跳板機</b>的位址（節點 <code>from=</code> 裡也填跳板機的位址，不要填面板的）。</p>{{end}}
+  {{else}}<p class="alert">面板還沒有 SSH 金鑰。請用 <code>panel ssh-keygen</code> 建立。</p>{{end}}
 </section>
 
 <section class="card">
-  <h2>Test</h2>
-  <p class="muted">Opens a connection to every node's service port through the jump host.</p>
-  <form method="post" action="/egress/test" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button>Test every node through the egress host</button></form>
+  <h2>測試</h2>
+  <p class="muted">經過跳板機，對每個節點的服務連接埠各開一條連線。</p>
+  <form method="post" action="/egress/test" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button>經跳板機測試所有節點</button></form>
   {{if .Data.Tests}}
   <table>
-    <tr><th>Node</th><th>Address</th><th>Result</th><th>Time</th></tr>
-    {{range .Data.Tests}}<tr class="{{if .OK}}ok{{else}}fail{{end}}"><td>{{.Node}}</td><td><code>{{.Addr}}</code></td><td><span class="dot"></span> {{if .OK}}reachable{{else}}{{.Err}}{{end}}</td><td>{{.Took}}</td></tr>{{end}}
+    <tr><th>節點</th><th>位址</th><th>結果</th><th>耗時</th></tr>
+    {{range .Data.Tests}}<tr class="{{if .OK}}ok{{else}}fail{{end}}"><td>{{.Node}}</td><td><code>{{.Addr}}</code></td><td><span class="dot"></span> {{if .OK}}可連通{{else}}{{.Err}}{{end}}</td><td>{{.Took}}</td></tr>{{end}}
   </table>
   {{end}}
 </section>

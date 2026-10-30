@@ -1,8 +1,8 @@
 {{template "head" .}}
 <form method="post" action="/login" class="card narrow">
-  <label>User name <input name="user" autocomplete="username" required autofocus></label>
-  <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
-  <label>Code from your authenticator app <input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" required></label>
-  <button>Sign in</button>
+  <label>使用者名稱 <input name="user" autocomplete="username" required autofocus></label>
+  <label>密碼 <input name="password" type="password" autocomplete="current-password" required></label>
+  <label>驗證器 App 上的驗證碼 <input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" required></label>
+  <button>登入</button>
 </form>
 {{template "foot" .}}

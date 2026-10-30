@@ -97,7 +97,7 @@ func (s *Server) sshSettings(w http.ResponseWriter, r *http.Request, _ *auth.Ses
 		return
 	}
 	s.log(r, "ssh-settings", fmt.Sprintf("node=%s user=%s port=%d unit=%s", n.Addr(), safe(user), port, safe(unit)), true)
-	http.Redirect(w, r, "/cluster/"+c.ID+"/node/"+n.ID+"?ok="+url.QueryEscape("SSH settings saved."), http.StatusSeeOther)
+	http.Redirect(w, r, "/cluster/"+c.ID+"/node/"+n.ID+"?ok="+url.QueryEscape("SSH 設定已儲存。"), http.StatusSeeOther)
 }
 
 // hostKey is the two-step confirmation: "fetch" shows the fingerprint, "trust" stores it, and only if the
@@ -116,7 +116,7 @@ func (s *Server) hostKey(w http.ResponseWriter, r *http.Request, _ *auth.Session
 	}
 	fp, typ, err := fetch(n.SSHAddr(), 10*time.Second)
 	if err != nil {
-		s.renderNode(w, r, nodePageData{Cluster: c, Node: n}, "", "Could not read the server's host key: "+err.Error(), http.StatusBadGateway)
+		s.renderNode(w, r, nodePageData{Cluster: c, Node: n}, "", "無法讀取伺服器的主機金鑰："+err.Error(), http.StatusBadGateway)
 		return
 	}
 	if r.FormValue("action") != "trust" {
@@ -126,7 +126,7 @@ func (s *Server) hostKey(w http.ResponseWriter, r *http.Request, _ *auth.Session
 	}
 	if r.FormValue("fingerprint") != fp {
 		s.log(r, "hostkey-trust", fmt.Sprintf("node=%s the key changed between showing and confirming", n.Addr()), false)
-		s.renderNode(w, r, nodePageData{Cluster: c, Node: n}, "", "The server presented a different key than the one you were shown. Nothing was saved.", http.StatusConflict)
+		s.renderNode(w, r, nodePageData{Cluster: c, Node: n}, "", "伺服器出示的金鑰和你剛才看到的不一樣。沒有儲存任何東西。", http.StatusConflict)
 		return
 	}
 	if err := s.Store.Mutate(func(st *store.State) error { st.Node(n.ID).HostKey = fp; return nil }); err != nil {
@@ -134,7 +134,7 @@ func (s *Server) hostKey(w http.ResponseWriter, r *http.Request, _ *auth.Session
 		return
 	}
 	s.log(r, "hostkey-trust", fmt.Sprintf("node=%s fingerprint=%s", n.Addr(), fp), true)
-	http.Redirect(w, r, "/cluster/"+c.ID+"/node/"+n.ID+"?ok="+url.QueryEscape("Host key confirmed."), http.StatusSeeOther)
+	http.Redirect(w, r, "/cluster/"+c.ID+"/node/"+n.ID+"?ok="+url.QueryEscape("主機金鑰已確認。"), http.StatusSeeOther)
 }
 
 // sshOp runs one SSH action with a deadline and the same error handling for all of them.
@@ -146,11 +146,11 @@ func (s *Server) sshOp(w http.ResponseWriter, r *http.Request, action string, ti
 		return
 	}
 	if s.Ops == nil {
-		s.renderNode(w, r, nodePageData{Cluster: c, Node: n}, "", "SSH management is not set up on this panel.", http.StatusServiceUnavailable)
+		s.renderNode(w, r, nodePageData{Cluster: c, Node: n}, "", "這個面板還沒有設定 SSH 管理。", http.StatusServiceUnavailable)
 		return
 	}
 	if s.Vault.Sealed() {
-		s.renderNode(w, r, nodePageData{Cluster: c, Node: n}, "", "The vault is sealed; the panel's SSH key is not available.", http.StatusServiceUnavailable)
+		s.renderNode(w, r, nodePageData{Cluster: c, Node: n}, "", "保險庫是封存狀態；面板的 SSH 金鑰目前無法使用。", http.StatusServiceUnavailable)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
@@ -176,7 +176,7 @@ func (s *Server) sshCheck(w http.ResponseWriter, r *http.Request, _ *auth.Sessio
 		if err != nil {
 			return nodePageData{Status: &st}, "", err
 		}
-		return nodePageData{Status: &st, Logs: logs}, "Read over SSH.", nil
+		return nodePageData{Status: &st, Logs: logs}, "已通過 SSH 讀取。", nil
 	})
 }
 
@@ -187,7 +187,7 @@ func (s *Server) sshControl(w http.ResponseWriter, r *http.Request, _ *auth.Sess
 		if err != nil {
 			return nodePageData{}, "", err
 		}
-		return nodePageData{Status: &st}, fmt.Sprintf("%s done; the service is %s.", verb, st.Active), nil
+		return nodePageData{Status: &st}, fmt.Sprintf("%s 已執行；服務目前狀態：%s。", verb, st.Active), nil
 	})
 }
 
@@ -199,14 +199,14 @@ func (s *Server) sshStopFor(w http.ResponseWriter, r *http.Request, _ *auth.Sess
 			http.NotFound(w, r)
 			return
 		}
-		s.renderNode(w, r, nodePageData{Cluster: c, Node: n}, "", "Minutes must be between 1 and 60.", http.StatusBadRequest)
+		s.renderNode(w, r, nodePageData{Cluster: c, Node: n}, "", "分鐘數必須在 1 到 60 之間。", http.StatusBadRequest)
 		return
 	}
 	s.sshOp(w, r, "ssh-stop-for", 40*time.Second, func(ctx context.Context, c *store.Cluster, n store.Node) (nodePageData, string, error) {
 		if err := s.Ops.StopFor(ctx, n, time.Duration(mins)*time.Minute); err != nil {
 			return nodePageData{}, "", err
 		}
-		return nodePageData{}, fmt.Sprintf("The service is stopped and starts again by itself in %d minute(s). Players switch to the other nodes meanwhile.", mins), nil
+		return nodePageData{}, fmt.Sprintf("服務已停止，%d 分鐘後會自己再啟動。期間玩家會切換到其他節點。", mins), nil
 	})
 }
 
@@ -248,7 +248,7 @@ func (s *Server) guardLastHealthy(n store.Node) error {
 		}
 	}
 	if healthy == 0 {
-		return fmt.Errorf("%s is the only healthy node of its cluster; upgrading it would leave players with nothing", n.Addr())
+		return fmt.Errorf("%s 是它所在集群裡唯一健康的節點；升級它會讓玩家無處可連", n.Addr())
 	}
 	return nil
 }
@@ -269,7 +269,7 @@ func (s *Server) upgradeAll(w http.ResponseWriter, r *http.Request, sess *auth.S
 		}
 	}
 	if s.Ops == nil || len(targets) == 0 {
-		s.renderCluster(w, r, id, "", "No node of this cluster is set up for SSH management yet.", http.StatusBadRequest)
+		s.renderCluster(w, r, id, "", "這個集群還沒有任何節點設定好 SSH 管理。", http.StatusBadRequest)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Minute)
@@ -287,11 +287,11 @@ func (s *Server) upgradeAll(w http.ResponseWriter, r *http.Request, sess *auth.S
 	}
 	if err != nil {
 		s.log(r, "upgrade-all", fmt.Sprintf("cluster=%s tag=%s stopped: %v | %s", c.Name, safe(tag), err, strings.Join(lines, " | ")), false)
-		s.renderCluster(w, r, id, "", "Stopped: "+err.Error()+" Done so far: "+strings.Join(lines, "; "), http.StatusBadGateway)
+		s.renderCluster(w, r, id, "", "已停止："+err.Error()+" 目前已完成："+strings.Join(lines, "; "), http.StatusBadGateway)
 		return
 	}
 	s.log(r, "upgrade-all", fmt.Sprintf("cluster=%s tag=%s %s", c.Name, safe(tag), strings.Join(lines, " | ")), true)
-	s.back(w, r, id, "All nodes upgraded to "+tag+": "+strings.Join(lines, "; "))
+	s.back(w, r, id, "所有節點已升級到 "+tag+"："+strings.Join(lines, "; "))
 }
 
 // ---------------------------------------------------------------- the panel's SSH key and the prepare script
@@ -304,7 +304,7 @@ type sshPageData struct {
 
 func (s *Server) panelKey() (pub string, has bool, err error) {
 	if s.Vault.Sealed() {
-		return "", false, fmt.Errorf("the vault is sealed")
+		return "", false, fmt.Errorf("保險庫是封存狀態")
 	}
 	pem, ok, err := s.Vault.Get(SSHKeyName)
 	if err != nil || !ok {
@@ -323,17 +323,17 @@ func (s *Server) sshPage(w http.ResponseWriter, r *http.Request, _ *auth.Session
 	if err != nil {
 		msg = err.Error()
 	}
-	s.render(w, r, "ssh.html", page{Title: "SSH management", Error: msg, Data: sshPageData{HasKey: has, PublicLine: pub}}, http.StatusOK)
+	s.render(w, r, "ssh.html", page{Title: "SSH 管理", Error: msg, Data: sshPageData{HasKey: has, PublicLine: pub}}, http.StatusOK)
 }
 
 func (s *Server) sshScript(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
 	pub, has, err := s.panelKey()
 	data := sshPageData{HasKey: has, PublicLine: pub}
 	fail := func(msg string) {
-		s.render(w, r, "ssh.html", page{Title: "SSH management", Error: msg, Data: data}, http.StatusBadRequest)
+		s.render(w, r, "ssh.html", page{Title: "SSH 管理", Error: msg, Data: data}, http.StatusBadRequest)
 	}
 	if err != nil || !has {
-		fail("The panel has no SSH key yet. Create one with `panel ssh-keygen` on the server.")
+		fail("面板還沒有 SSH 金鑰。請在伺服器上用 `panel ssh-keygen` 建立。")
 		return
 	}
 	tag := strings.TrimSpace(r.FormValue("tag"))
@@ -341,7 +341,7 @@ func (s *Server) sshScript(w http.ResponseWriter, r *http.Request, _ *auth.Sessi
 	defer cancel()
 	b, err := s.releases().Fetch(ctx, tag, "nodectl-linux-amd64")
 	if err != nil {
-		fail("Could not get nodectl for that release: " + err.Error())
+		fail("無法取得該版本的 nodectl：" + err.Error())
 		return
 	}
 	base := strings.TrimRight(s.releases().Base, "/")
@@ -352,7 +352,7 @@ func (s *Server) sshScript(w http.ResponseWriter, r *http.Request, _ *auth.Sessi
 	}
 	data.Script = script
 	s.log(r, "ssh-script", "release="+safe(tag), true)
-	s.render(w, r, "ssh.html", page{Title: "SSH management", Data: data}, http.StatusOK)
+	s.render(w, r, "ssh.html", page{Title: "SSH 管理", Data: data}, http.StatusOK)
 }
 
 var _ = engine.ProbeResult{}

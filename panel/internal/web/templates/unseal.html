@@ -1,12 +1,12 @@
 {{template "head" .}}
 <form method="post" action="/unseal" class="card narrow">
   {{if .Sealed}}
-  <p class="muted">The vault holds the signing keys, token secrets and DNS credentials, encrypted. Enter the passphrase to open it. It is never stored; after a restart the vault is sealed again.</p>
+  <p class="muted">保險庫以加密方式保存簽名金鑰、token 密鑰與 DNS 憑證。請輸入口令來開啟。口令不會被儲存；重新啟動後保險庫會再次封存。</p>
   <input type="hidden" name="csrf" value="{{.CSRF}}">
-  <label>Vault passphrase <input name="passphrase" type="password" autocomplete="off" required autofocus></label>
-  <button class="primary">Unseal</button>
+  <label>保險庫口令 <input name="passphrase" type="password" autocomplete="off" required autofocus></label>
+  <button class="primary">解封</button>
   {{else}}
-  <p>The vault is already unsealed.</p>
+  <p>保險庫已經解封。</p>
   <input type="hidden" name="csrf" value="{{.CSRF}}">
   {{end}}
 </form>

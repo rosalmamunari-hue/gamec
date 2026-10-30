@@ -595,7 +595,7 @@ func TestSealedVaultIsAnnouncedAndUnsealingWorks(t *testing.T) {
 	c := e.admin()
 	e.vault.Seal()
 	_, body, _ := c.get("/")
-	if !strings.Contains(body, "sealed") {
+	if !strings.Contains(body, "封存") {
 		t.Fatal("the dashboard does not say the vault is sealed")
 	}
 	if st, _, _ := c.post("/unseal", url.Values{"csrf": {c.csrf()}, "passphrase": {"wrong wrong wrong"}}, nil); st != http.StatusUnauthorized || !e.vault.Sealed() {

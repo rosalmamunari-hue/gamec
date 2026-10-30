@@ -1,17 +1,17 @@
 {{template "head" .}}
 <form method="post" action="/cluster/new" class="card stack">
   <input type="hidden" name="csrf" value="{{.CSRF}}">
-  <p class="muted">A cluster is one release channel: its own origin server, nodes, DNS name, signing key and token secret. A new signing key and token secret are generated here and stored in the vault.</p>
-  <label>Name (for example the channel) <input name="name" required></label>
-  <label>Origin (where its nodes forward to; for your notes) <input name="origin" placeholder="203.0.113.5:10443"></label>
-  <label>Each signed list is valid for (days) <input name="valid_days" value="30" size="4" required></label>
-  <label>Renew this many days before it expires <input name="renew_days" value="10" size="4" required></label>
-  <h2>First DNS target</h2>
-  <label>Provider
+  <p class="muted">一個集群就是一個發行渠道：有自己的源站、節點、DNS 名稱、簽名金鑰與 token 密鑰。新的簽名金鑰和 token 密鑰會在這裡產生並存入保險庫。</p>
+  <label>名稱（例如渠道名） <input name="name" required></label>
+  <label>源站（節點轉發的目標；僅供備註） <input name="origin" placeholder="203.0.113.5:10443"></label>
+  <label>每份簽名名單的有效天數 <input name="valid_days" value="30" size="4" required></label>
+  <label>到期前幾天開始續期 <input name="renew_days" value="10" size="4" required></label>
+  <h2>第一個 DNS 目標</h2>
+  <label>服務商
     <select name="provider"><option>manual</option><option>cloudflare</option><option>spaceship</option><option>aliyun</option></select></label>
-  <label>Zone (the registered domain) <input name="zone" placeholder="example.com" required></label>
-  <label>Record name <input name="dns_name" placeholder="_gs.example.com" required></label>
-  <label>Credentials name (not needed for manual) <input name="cred_ref" placeholder="main"></label>
-  <button class="primary">Create cluster</button>
+  <label>Zone（已註冊的網域） <input name="zone" placeholder="example.com" required></label>
+  <label>記錄名稱 <input name="dns_name" placeholder="_gs.example.com" required></label>
+  <label>憑證名稱（manual 不需要） <input name="cred_ref" placeholder="main"></label>
+  <button class="primary">建立集群</button>
 </form>
 {{template "foot" .}}
