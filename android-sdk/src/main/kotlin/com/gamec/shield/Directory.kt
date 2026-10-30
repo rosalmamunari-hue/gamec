@@ -123,8 +123,18 @@ internal class NodeDirectory(
         val usable = if (c != null && now <= c.exp) c else null
         if (now < nextTryAt) return usable
         try {
-            val fresh = ListVerifier.parse(queryTxt(cfg.name), cfg.publicKey, now)
-            if (c != null && fresh.iat < c.iat) throw SecurityException("older node list ignored")
+            var fresh: NodeList? = null
+            for (n in listOf(cfg.name) + cfg.fallbackNames) {
+                try {
+                    val f = ListVerifier.parse(queryTxt(n), cfg.publicKey, now)
+                    if (c != null && f.iat < c.iat) continue // stale copy at this name; try the next
+                    fresh = f
+                    break
+                } catch (_: Exception) {
+                    // unreadable or forged at this name; try the next
+                }
+            }
+            if (fresh == null) throw SecurityException("no name gave a usable node list")
             current = fresh
             nextTryAt = now + cfg.refreshSec
             try { cfg.store?.save(fresh.records) } catch (_: Exception) {}

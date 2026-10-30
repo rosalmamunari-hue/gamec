@@ -123,8 +123,14 @@ final class NodeDirectory {
         let usable: NodeList? = (current != nil && now <= current!.exp) ? current : nil
         if now < nextTryAt { return usable }
         do {
-            let fresh = try ListVerifier.parse(queryTxt(cfg.name), publicKeyB64: cfg.publicKey, now: now)
-            if let c = current, fresh.iat < c.iat { throw ShieldError.badResponse } // older list ignored
+            var found: NodeList?
+            for n in [cfg.name] + cfg.fallbackNames {
+                guard let f = try? ListVerifier.parse(queryTxt(n), publicKeyB64: cfg.publicKey, now: now) else { continue }
+                if let c = current, f.iat < c.iat { continue } // stale copy at this name; try the next
+                found = f
+                break
+            }
+            guard let fresh = found else { throw ShieldError.badResponse }
             current = fresh
             nextTryAt = now + Int64(cfg.refreshInterval)
             cfg.store?.save(fresh.records)

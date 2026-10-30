@@ -61,6 +61,9 @@ public struct DiscoveryConfig {
     public let publicKey: String
     /// Stable random id for this install; see `DeviceID.getOrCreate()`.
     public let deviceId: String
+    /// Backup names holding the same list (put them under a different domain, ideally at a different DNS
+    /// provider). Tried in order when `name` cannot be read or its list does not verify.
+    public let fallbackNames: [String]
     /// DNS-over-HTTPS JSON endpoints. Use IP addresses so no lookup is needed to reach them. Add several:
     /// some are unreachable in some countries.
     public let dohProviders: [String]
@@ -80,6 +83,7 @@ public struct DiscoveryConfig {
     public let store: ListStore?
 
     public init(name: String, publicKey: String, deviceId: String,
+                fallbackNames: [String] = [],
                 dohProviders: [String] = DnsDefaults.doh,
                 dotServers: [String] = DnsDefaults.dot,
                 resolverStagger: TimeInterval = 0.2,
@@ -91,6 +95,7 @@ public struct DiscoveryConfig {
         self.name = name
         self.publicKey = publicKey
         self.deviceId = deviceId
+        self.fallbackNames = fallbackNames
         self.dohProviders = dohProviders
         self.dotServers = dotServers
         self.resolverStagger = resolverStagger

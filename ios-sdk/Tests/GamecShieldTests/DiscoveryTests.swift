@@ -153,6 +153,28 @@ final class DiscoveryTests: XCTestCase {
         XCTAssertEqual(queries, 2)
     }
 
+    func testDirectoryFallsBackToTheNextNameWhenTheFirstIsDownOrForged() throws {
+        let k = P256.Signing.PrivateKey()
+        let good = try records(k, nodes(2), iat: 900, exp: 99_999)
+        let forged = try records(P256.Signing.PrivateKey(), nodes(1), iat: 900, exp: 99_999)
+        var asked: [String] = []
+        let c = try DiscoveryConfig(name: "a.example.com", publicKey: pub(k), deviceId: "device-1234567890abcdef",
+                                    fallbackNames: ["b.example.com", "c.example.com"])
+        let d = NodeDirectory(cfg: c, queryTxt: { n in
+            asked.append(n)
+            switch n { case "a.example.com": return []; case "b.example.com": return forged; default: return good }
+        }, clock: { 1000 })
+        XCTAssertEqual(d.get()?.nodes.count, 2)
+        XCTAssertEqual(asked, ["a.example.com", "b.example.com", "c.example.com"])
+    }
+
+    func testDirectoryFailsOnlyWhenEveryNameFails() throws {
+        let k = P256.Signing.PrivateKey()
+        let c = try DiscoveryConfig(name: "a.example.com", publicKey: pub(k), deviceId: "device-1234567890abcdef",
+                                    fallbackNames: ["b.example.com"])
+        XCTAssertNil(NodeDirectory(cfg: c, queryTxt: { _ in [] }, clock: { 1000 }).get())
+    }
+
     func testDirectoryNeverGoesBackToAnOlderList() throws {
         let k = P256.Signing.PrivateKey()
         var now: Int64 = 1000

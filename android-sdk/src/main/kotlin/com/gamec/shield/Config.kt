@@ -42,6 +42,11 @@ class DiscoveryConfig(
     /** Stable random id for this install; see [DeviceId.getOrCreate]. */
     val deviceId: String,
     /**
+     * Backup names holding the same list (put them under a different domain, ideally at a different DNS
+     * provider). Tried in order when [name] cannot be read or its list does not verify.
+     */
+    val fallbackNames: List<String> = emptyList(),
+    /**
      * DNS-over-HTTPS JSON endpoints. Use IP addresses so no lookup is needed to reach them. Add several:
      * some are unreachable in some countries.
      */

@@ -177,6 +177,30 @@ class DiscoveryTest {
     }
 
     @Test
+    fun directoryFallsBackToTheNextNameWhenTheFirstIsDownOrForged() {
+        val k = newKey()
+        val other = newKey()
+        val good = records(k, nodes(2), iat = 900, exp = 99_999)
+        val forged = records(other, nodes(1), iat = 900, exp = 99_999)
+        val asked = mutableListOf<String>()
+        val c = DiscoveryConfig("a.example.com", pub(k), "device-1234567890abcdef",
+            fallbackNames = listOf("b.example.com", "c.example.com"))
+        val d = NodeDirectory(c, { n ->
+            asked += n
+            when (n) { "a.example.com" -> emptyList(); "b.example.com" -> forged; else -> good }
+        }, { 1000 })
+        assertEquals(2, d.get()!!.nodes.size)
+        assertEquals(listOf("a.example.com", "b.example.com", "c.example.com"), asked)
+    }
+
+    @Test
+    fun directoryFailsOnlyWhenEveryNameFails() {
+        val k = newKey()
+        val c = DiscoveryConfig("a.example.com", pub(k), "device-1234567890abcdef", fallbackNames = listOf("b.example.com"))
+        assertNull(NodeDirectory(c, { emptyList() }, { 1000 }).get())
+    }
+
+    @Test
     fun directoryNeverGoesBackToAnOlderList() {
         val k = newKey()
         var now = 1000L
