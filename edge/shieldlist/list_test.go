@@ -45,25 +45,43 @@ func TestEmptyListIsNeverSigned(t *testing.T) {
 	}
 }
 
-func TestRecordsAreShortEnoughForOneTXTString(t *testing.T) {
-	recs, _ := BuildRecords(key(t), manyNodes(5), time.Now(), time.Hour)
+func TestAShortListIsOneBareRecord(t *testing.T) {
+	k := key(t)
+	recs, _ := BuildRecords(k, manyNodes(5), time.Now(), time.Hour)
+	if len(recs) != 1 {
+		t.Fatalf("5 nodes should fit in one record, got %d", len(recs))
+	}
+	r := recs[0]
+	if strings.Contains(r, ":") || strings.ContainsAny(r, "\" \\+/=") || !IsRecord(r) {
+		t.Fatalf("a bare record has no lead-in and only DNS-friendly characters: %q", r)
+	}
+	if len(r) > 2000 {
+		t.Fatalf("record is %d bytes; many DNS panels stop at 2048", len(r))
+	}
+	if _, err := VerifyRecords(recs, &k.PublicKey, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestALongListIsSplitIntoNumberedRecords(t *testing.T) {
+	k := key(t)
+	recs, _ := BuildRecords(k, manyNodes(60), time.Now(), time.Hour)
 	if len(recs) < 2 {
-		t.Fatalf("5 nodes should need several records, got %d", len(recs))
+		t.Fatalf("60 nodes should need several records, got %d", len(recs))
 	}
 	for _, r := range recs {
-		if len(r) > 255 {
-			t.Fatalf("record is %d bytes, over the 255-byte TXT string limit", len(r))
+		if !recordRe.MatchString(r) || len(r) > ChunkSize+10 {
+			t.Fatalf("bad record %d bytes: %.30s", len(r), r)
 		}
-		body := r[strings.LastIndex(r, ":")+1:]
-		if strings.ContainsAny(body, "\" \\+/=") {
-			t.Fatalf("record data contains characters that are awkward in DNS panels: %q", body)
-		}
+	}
+	if _, err := VerifyRecords(recs, &k.PublicKey, time.Now()); err != nil {
+		t.Fatal(err)
 	}
 }
 
 func TestRecordOrderDoesNotMatter(t *testing.T) {
 	k := key(t)
-	recs, _ := BuildRecords(k, manyNodes(5), time.Now(), time.Hour)
+	recs, _ := BuildRecords(k, manyNodes(60), time.Now(), time.Hour)
 	for i, j := 0, len(recs)-1; i < j; i, j = i+1, j-1 {
 		recs[i], recs[j] = recs[j], recs[i]
 	}
@@ -92,7 +110,7 @@ func TestWrongKeyIsRejected(t *testing.T) {
 
 func TestMissingChunkIsRejected(t *testing.T) {
 	k := key(t)
-	recs, _ := BuildRecords(k, manyNodes(5), time.Now(), time.Hour)
+	recs, _ := BuildRecords(k, manyNodes(60), time.Now(), time.Hour)
 	if _, err := VerifyRecords(recs[1:], &k.PublicKey, time.Now()); err == nil {
 		t.Fatal("an incomplete record set must not be accepted")
 	}

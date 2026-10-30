@@ -60,7 +60,7 @@ go run ./cmd/signlist -gen-key list.key           # once; prints the PUBLIC key 
 go run ./cmd/signlist -key list.key -nodes nodes.json -valid-days 30
 ```
 
-Add every printed `1/3:...`-style line as a **TXT record under one name** (e.g. `_gs.example.com`, TTL 60).
+Add every printed line as a **TXT record under one name** (e.g. `cfg.example.com`, TTL 60). A short list is a single long record; a long one is several lines starting `1/3:`, `2/3:`...
 Check what the world sees: `go run ./cmd/signlist -check _gs.example.com -pub <public key>`.
 
 * `list.key` signs the list. **Keep it on your own computer, never on a server**, and back it up: losing it

@@ -30,7 +30,8 @@ internal class NodeList(val nodes: List<Node>, val iat: Long, val exp: Long, val
 internal object ListVerifier {
     private val b64 = Base64.getUrlDecoder()
     private val recordRe = Regex("^[0-9]{1,3}/[0-9]{1,3}:")
-    fun isRecord(r: String) = recordRe.containsMatchIn(r)
+    private val bareRe = Regex("^[A-Za-z0-9_-]{16,}\\.[A-Za-z0-9_-]{16,}$")
+    fun isRecord(r: String) = recordRe.containsMatchIn(r) || bareRe.matches(r)
 
     fun parse(records: List<String>, publicKeyB64: String, nowSec: Long): NodeList {
         // part index -> data, grouped by the total the record claims; only complete groups are tried
@@ -38,6 +39,11 @@ internal object ListVerifier {
         val dup = HashSet<Int>()
         for (r in records) {
             if (!isRecord(r)) continue
+            if (bareRe.matches(r)) { // the whole list in one record
+                val g = groups.getOrPut(1) { HashMap() }
+                if (g.put(1, r) != null) dup.add(1)
+                continue
+            }
             val f = r.split(":", limit = 2)
             if (f.size != 2) continue
             val pos = f[0].split("/")

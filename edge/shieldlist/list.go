@@ -1,6 +1,6 @@
 // Package shieldlist builds, signs and verifies the node list that is published as DNS TXT records.
 //
-// Record format: "<i>/<n>:<chunk>"; the chunks joined are base64url(payload) "." base64url(signature),
+// Record format: the bare list, or when it is long "<i>/<n>:<chunk>"; the chunks joined are base64url(payload) "." base64url(signature),
 // where signature is ASN.1 ECDSA P-256 over SHA-256(payload) and payload is
 // {"v":1,"iat":unix,"exp":unix,"nodes":[{"h":host,"p":port,"k":pin}]}.
 // The apps (Android, iOS) implement the verifying side of exactly this format.
@@ -23,8 +23,10 @@ import (
 	"time"
 )
 
-// ChunkSize keeps every record comfortably inside one 255-byte TXT string.
-const ChunkSize = 200
+// ChunkSize is how much of the list one TXT record carries. A list of a handful of nodes fits in one record,
+// which is then just the bare list (no lead-in); a longer one is cut into "<i>/<n>:<part>" records.
+// A TXT record may hold several 255-byte strings; resolvers and DNS-over-HTTPS hand them back joined.
+const ChunkSize = 1500
 
 // Node is one entry of the list.
 type Node struct {
@@ -111,6 +113,9 @@ func BuildRecords(k *ecdsa.PrivateKey, nodes []Node, now time.Time, valid time.D
 		body = body[ChunkSize:]
 	}
 	chunks = append(chunks, body)
+	if len(chunks) == 1 {
+		return chunks, nil
+	}
 	recs := make([]string, len(chunks))
 	for i, c := range chunks {
 		recs[i] = fmt.Sprintf("%d/%d:%s", i+1, len(chunks), c)
@@ -119,10 +124,11 @@ func BuildRecords(k *ecdsa.PrivateKey, nodes []Node, now time.Time, valid time.D
 }
 
 var recordRe = regexp.MustCompile(`^[0-9]{1,3}/[0-9]{1,3}:`)
+var bareRe = regexp.MustCompile(`^[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}$`)
 
 // IsRecord says whether a TXT value is one of the list's records (the "<i>/<n>:" lead-in). Other TXT values
 // at the same name are none of our business.
-func IsRecord(v string) bool { return recordRe.MatchString(v) }
+func IsRecord(v string) bool { return recordRe.MatchString(v) || bareRe.MatchString(v) }
 
 // VerifyRecords reassembles the records and checks the signature and expiry (what the apps do).
 // Records that do not look like "<i>/<n>:" are ignored.
@@ -131,6 +137,11 @@ func VerifyRecords(records []string, pub *ecdsa.PublicKey, now time.Time) (*Payl
 	total := 0
 	for _, r := range records {
 		if !IsRecord(r) {
+			continue
+		}
+		if bareRe.MatchString(r) { // the whole list in one record
+			total = 1
+			parts[1] = r
 			continue
 		}
 		f := strings.SplitN(r, ":", 2)

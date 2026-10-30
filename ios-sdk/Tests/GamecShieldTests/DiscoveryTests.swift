@@ -27,6 +27,7 @@ final class DiscoveryTests: XCTestCase {
             parts.append(String(rest.prefix(chunk)))
             rest = rest.dropFirst(chunk)
         }
+        if parts.count == 1 { return parts } // a list that fits is one bare record, like the edge tools make
         return parts.enumerated().map { "\($0.offset + 1)/\(parts.count):\($0.element)" }
     }
 
@@ -61,6 +62,14 @@ final class DiscoveryTests: XCTestCase {
         XCTAssertEqual(urls.count, 2)
         XCTAssertTrue(urls[1].absoluteString.contains("name=_gs.example.com"))
         XCTAssertTrue(urls[1].absoluteString.contains("type=TXT"))
+    }
+
+    func testAShortListIsOneBareRecordAndParses() throws {
+        let k = P256.Signing.PrivateKey()
+        let recs = try records(k, [Node(host: "10.0.0.1", port: 30800, pinSha256: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefg=")], chunk: 100_000)
+        XCTAssertEqual(recs.count, 1)
+        XCTAssertFalse(recs[0].contains(":"))
+        XCTAssertEqual(try ListVerifier.parse(recs + ["v=spf1 -all"], publicKeyB64: pub(k), now: 200).nodes.count, 1)
     }
 
     func testDohReturnsNothingWhenEveryProviderFails() {

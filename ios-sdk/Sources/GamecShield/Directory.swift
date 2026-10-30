@@ -38,12 +38,23 @@ enum ListVerifier {
         return Data(base64Encoded: t)
     }
 
+    private static let bareListPattern = "^[A-Za-z0-9_-]{16,}\\.[A-Za-z0-9_-]{16,}$"
+
+    static func isRecord(_ r: String) -> Bool {
+        r.range(of: "^[0-9]{1,3}/[0-9]{1,3}:", options: .regularExpression) != nil
+            || r.range(of: bareListPattern, options: .regularExpression) != nil
+    }
+
     static func parse(_ records: [String], publicKeyB64: String, now: Int64) throws -> NodeList {
-        let gs = records.filter { $0.range(of: "^[0-9]{1,3}/[0-9]{1,3}:", options: .regularExpression) != nil }
+        let gs = records.filter { isRecord($0) }
         // total -> (index -> data); only complete, unambiguous groups are tried
         var groups: [Int: [Int: String]] = [:]
         var ambiguous = Set<Int>()
         for r in gs {
+            if r.range(of: bareListPattern, options: .regularExpression) != nil { // the whole list in one record
+                if groups[1, default: [:]].updateValue(r, forKey: 1) != nil { ambiguous.insert(1) }
+                continue
+            }
             let f = r.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
             guard f.count == 2 else { continue }
             let pos = f[0].split(separator: "/", omittingEmptySubsequences: false)

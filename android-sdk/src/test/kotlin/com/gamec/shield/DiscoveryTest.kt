@@ -33,6 +33,7 @@ class DiscoveryTest {
         }
         val enc = Base64.getUrlEncoder().withoutPadding()
         val chunks = (enc.encodeToString(payload) + "." + enc.encodeToString(sig)).chunked(chunk)
+        if (chunks.size == 1) return chunks // a list that fits is one bare record, like the edge tools make
         return chunks.mapIndexed { i, c -> "${i + 1}/${chunks.size}:$c" }
     }
 
@@ -82,6 +83,17 @@ class DiscoveryTest {
     }
 
     // ---- signed list ----
+
+    @Test
+    fun aShortListIsOneBareRecordAndParses() {
+        val k = newKey()
+        val recs = records(k, nodes(3), chunk = 100_000)
+        assertEquals(1, recs.size)
+        assertTrue(!recs[0].contains(":") && ListVerifier.isRecord(recs[0]))
+        assertEquals(nodes(3), ListVerifier.parse(recs, pub(k), 200).nodes)
+        // a TXT record that merely sits next to it is ignored
+        assertEquals(nodes(3), ListVerifier.parse(recs + "v=spf1 -all", pub(k), 200).nodes)
+    }
 
     @Test
     fun validMultiChunkListParses() {
