@@ -2,11 +2,17 @@
 //
 // Record format: the bare list, or when it is long "<i>/<n>:<chunk>"; the chunks joined are base64url(payload) "." base64url(signature),
 // where signature is ASN.1 ECDSA P-256 over SHA-256(payload) and payload is
-// {"v":1,"iat":unix,"exp":unix,"nodes":[{"h":host,"p":port,"k":pin}]}.
+// {"v":1,"iat":unix,"exp":unix,"nodes":[{"h":host,"p":port,"k":pin}],"next":[name,...]}.
+// "next" (optional) lists the names the apps should read from next time; the names built into the app are then
+// only a fallback.
+// The list can also be sealed: the first half is then base64url(nonce || AES-256-GCM(payload)) instead of
+// base64url(payload); the signature is still over the plain payload. An app without the key cannot read it.
 // The apps (Android, iOS) implement the verifying side of exactly this format.
 package shieldlist
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -41,6 +47,32 @@ type Payload struct {
 	Iat   int64  `json:"iat"`
 	Exp   int64  `json:"exp"`
 	Nodes []Node `json:"nodes"`
+	// Next are the names to read the list from next time (optional).
+	Next []string `json:"next,omitempty"`
+}
+
+// Options are the optional parts of a list.
+type Options struct {
+	Next    []string // names for the apps to use from now on
+	SealKey []byte   // 32 bytes: encrypt the payload with AES-256-GCM
+}
+
+// NewSealKey makes a random key for sealing lists.
+func NewSealKey() ([]byte, error) {
+	k := make([]byte, 32)
+	_, err := rand.Read(k)
+	return k, err
+}
+
+func gcm(key []byte) (cipher.AEAD, error) {
+	if len(key) != 32 {
+		return nil, errors.New("seal key must be 32 bytes")
+	}
+	b, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	return cipher.NewGCM(b)
 }
 
 // GenerateKey makes a new signing key.
@@ -92,10 +124,15 @@ func ParsePublicKeyB64(s string) (*ecdsa.PublicKey, error) {
 
 // BuildRecords signs the list and splits it into TXT record values.
 func BuildRecords(k *ecdsa.PrivateKey, nodes []Node, now time.Time, valid time.Duration) ([]string, error) {
+	return BuildRecordsOpts(k, nodes, now, valid, Options{})
+}
+
+// BuildRecordsOpts is BuildRecords with the optional next names and sealing.
+func BuildRecordsOpts(k *ecdsa.PrivateKey, nodes []Node, now time.Time, valid time.Duration, o Options) ([]string, error) {
 	if len(nodes) == 0 {
 		return nil, errors.New("refusing to sign an empty node list")
 	}
-	payload, err := json.Marshal(Payload{V: 1, Iat: now.Unix(), Exp: now.Add(valid).Unix(), Nodes: nodes})
+	payload, err := json.Marshal(Payload{V: 1, Iat: now.Unix(), Exp: now.Add(valid).Unix(), Nodes: nodes, Next: o.Next})
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +142,19 @@ func BuildRecords(k *ecdsa.PrivateKey, nodes []Node, now time.Time, valid time.D
 		return nil, err
 	}
 	enc := base64.RawURLEncoding
-	body := enc.EncodeToString(payload) + "." + enc.EncodeToString(sig)
+	first := payload
+	if o.SealKey != nil {
+		aead, err := gcm(o.SealKey)
+		if err != nil {
+			return nil, err
+		}
+		nonce := make([]byte, aead.NonceSize())
+		if _, err := rand.Read(nonce); err != nil {
+			return nil, err
+		}
+		first = aead.Seal(nonce, nonce, payload, nil)
+	}
+	body := enc.EncodeToString(first) + "." + enc.EncodeToString(sig)
 
 	var chunks []string
 	for len(body) > ChunkSize {
@@ -133,6 +182,11 @@ func IsRecord(v string) bool { return recordRe.MatchString(v) || bareRe.MatchStr
 // VerifyRecords reassembles the records and checks the signature and expiry (what the apps do).
 // Records that do not look like "<i>/<n>:" are ignored.
 func VerifyRecords(records []string, pub *ecdsa.PublicKey, now time.Time) (*Payload, error) {
+	return VerifyRecordsSealed(records, pub, now, nil)
+}
+
+// VerifyRecordsSealed is VerifyRecords for lists that may be sealed with sealKey (nil = not sealed).
+func VerifyRecordsSealed(records []string, pub *ecdsa.PublicKey, now time.Time, sealKey []byte) (*Payload, error) {
 	parts := map[int]string{}
 	total := 0
 	for _, r := range records {
@@ -180,6 +234,15 @@ func VerifyRecords(records []string, pub *ecdsa.PublicKey, now time.Time) (*Payl
 	sig, err2 := base64.RawURLEncoding.DecodeString(f[1])
 	if err1 != nil || err2 != nil {
 		return nil, errors.New("malformed base64")
+	}
+	if sealKey != nil {
+		if aead, err := gcm(sealKey); err != nil {
+			return nil, err
+		} else if len(payload) > aead.NonceSize() {
+			if plain, err := aead.Open(nil, payload[:aead.NonceSize()], payload[aead.NonceSize():], nil); err == nil {
+				payload = plain // otherwise it was not sealed: the signature check decides
+			}
+		}
 	}
 	digest := sha256.Sum256(payload)
 	if !ecdsa.VerifyASN1(pub, digest[:], sig) {

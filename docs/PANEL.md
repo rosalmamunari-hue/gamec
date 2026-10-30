@@ -228,3 +228,9 @@ panel get-secret -name cluster/<id>/node_secret    读密钥（会写审计）
 panel verify-audit                  检查审计日志是否被改过
 panel serve [-listen A] [-secure] [-trust-proxy] [-probe-interval 1m] [-tick 30s]
 ```
+
+## 加密名單與「下一批域名」
+
+- **下一批域名**：每次更新名單，面板都會把「這個渠道寫入的所有域名」一起簽進名單（`next` 欄位）。App 讀到後會記住，之後優先去這些域名讀，包裡內建的域名只當備援。內建域名被盯上時，換一批新的即可，已更新過的玩家不受影響。舊版 App 會忽略這個欄位。
+- **加密名單**（渠道頁 →「加密名單」）：開啟後名單內容用 AES-256-GCM 加密，只看 DNS 紀錄的人讀不到節點 IP。金鑰會顯示在「給 App 用的設定」，填進 App 的 `listKey`。**沒有金鑰的舊 App 會讀不到名單**，請在新版本鋪開後再開。金鑰在 App 裡，所以這只是提高門檻。
+- **設定打包**：`signlist -seal-config <口令> -name <域名> -fallback <備用域名> -pub <公鑰> [-seal-key <金鑰>]` 會印出一串加密過的設定，App 用 `SealedConfig.open(串, 口令)` 讀出域名和密鑰，包裡就沒有明文域名。口令也在 App 裡，只防得住 `strings`/grep 這類粗略掃描。

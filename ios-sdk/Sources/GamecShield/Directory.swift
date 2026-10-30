@@ -19,6 +19,8 @@ struct NodeList {
     let iat: Int64
     let exp: Int64
     let records: [String]
+    /// Names the panel says to read from next time; the ones built into the app are then only a fallback.
+    var next: [String] = []
 }
 
 /// Parses the signed node list published as DNS TXT records (see edge/cmd/signlist for the format).
@@ -30,6 +32,7 @@ enum ListVerifier {
         let iat: Int64
         let exp: Int64
         let nodes: [N]
+        let next: [String]?
     }
 
     static func base64url(_ s: String) -> Data? {
@@ -45,7 +48,7 @@ enum ListVerifier {
             || r.range(of: bareListPattern, options: .regularExpression) != nil
     }
 
-    static func parse(_ records: [String], publicKeyB64: String, now: Int64) throws -> NodeList {
+    static func parse(_ records: [String], publicKeyB64: String, now: Int64, listKeyB64: String? = nil) throws -> NodeList {
         let gs = records.filter { isRecord($0) }
         // total -> (index -> data); only complete, unambiguous groups are tried
         var groups: [Int: [Int: String]] = [:]
@@ -67,7 +70,7 @@ enum ListVerifier {
         for (n, parts) in groups where !ambiguous.contains(n) && parts.count == n {
             do {
                 let body = (1...n).map { parts[$0]! }.joined()
-                let l = try verify(body, publicKeyB64: publicKeyB64, now: now, records: gs)
+                let l = try verify(body, publicKeyB64: publicKeyB64, now: now, records: gs, listKeyB64: listKeyB64)
                 if best == nil || l.iat > best!.iat { best = l }
             } catch {
                 lastError = error
@@ -77,9 +80,21 @@ enum ListVerifier {
         throw lastError
     }
 
-    private static func verify(_ body: String, publicKeyB64: String, now: Int64, records: [String]) throws -> NodeList {
+    /// nonce(12) || ciphertext || tag, AES-256-GCM; nil when `data` is not sealed with this key.
+    private static func unseal(_ data: Data, keyB64: String) -> Data? {
+        guard let kd = Data(base64Encoded: keyB64), kd.count == 32,
+              let box = try? AES.GCM.SealedBox(combined: data),
+              let plain = try? AES.GCM.open(box, using: SymmetricKey(data: kd)) else { return nil }
+        return plain
+    }
+
+    private static func verify(_ body: String, publicKeyB64: String, now: Int64, records: [String],
+                               listKeyB64: String?) throws -> NodeList {
         let f = body.split(separator: ".", maxSplits: 1, omittingEmptySubsequences: false)
-        guard f.count == 2, let payload = base64url(String(f[0])), let sigDer = base64url(String(f[1])),
+        // an unsealed list simply fails to decrypt and is checked as it is: the signature decides
+        let first = base64url(String(f.first ?? ""))
+        let payloadOpt: Data? = first.flatMap { d in listKeyB64.flatMap { unseal(d, keyB64: $0) } ?? d }
+        guard f.count == 2, let payload = payloadOpt, let sigDer = base64url(String(f[1])),
               let keyDer = Data(base64Encoded: publicKeyB64),
               let key = try? P256.Signing.PublicKey(derRepresentation: keyDer),
               let sig = try? P256.Signing.ECDSASignature(derRepresentation: sigDer),
@@ -92,7 +107,7 @@ enum ListVerifier {
             return Node(host: n.h, port: port, pinSha256: n.k)
         }
         guard !nodes.isEmpty else { throw ShieldError.emptyNodeList }
-        return NodeList(nodes: nodes, iat: p.iat, exp: p.exp, records: records)
+        return NodeList(nodes: nodes, iat: p.iat, exp: p.exp, records: records, next: p.next ?? [])
     }
 }
 
@@ -114,7 +129,7 @@ final class NodeDirectory {
         self.queryTxt = queryTxt ?? { Resolvers.query(cfg: cfg, name: $0) }
         self.clock = clock
         if let saved = cfg.store?.load(), !saved.isEmpty {
-            current = try? ListVerifier.parse(saved, publicKeyB64: cfg.publicKey, now: clock())
+            current = try? ListVerifier.parse(saved, publicKeyB64: cfg.publicKey, now: clock(), listKeyB64: cfg.listKey)
         }
     }
 
@@ -133,6 +148,12 @@ final class NodeDirectory {
         return fetch(now)
     }
 
+    /// The names the last good list pointed to come first; the ones built into the app are the fallback.
+    private func names() -> [String] {
+        var seen = Set<String>()
+        return ((current?.next ?? []) + [cfg.name] + cfg.fallbackNames).filter { seen.insert($0).inserted }
+    }
+
     private func usable(_ now: Int64) -> NodeList? {
         if let c = current, now <= c.exp { return c }
         return nil
@@ -141,8 +162,9 @@ final class NodeDirectory {
     private func fetch(_ now: Int64) -> NodeList? {
         lastTryAt = now
         var found: NodeList?
-        for n in [cfg.name] + cfg.fallbackNames {
-            guard let f = try? ListVerifier.parse(queryTxt(n), publicKeyB64: cfg.publicKey, now: now) else { continue }
+        for n in names() {
+            guard let f = try? ListVerifier.parse(queryTxt(n), publicKeyB64: cfg.publicKey, now: now,
+                                                  listKeyB64: cfg.listKey) else { continue }
             if let c = current, f.iat < c.iat { continue } // stale copy at this name; try the next
             found = f
             break

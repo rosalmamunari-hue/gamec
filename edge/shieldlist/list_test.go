@@ -166,3 +166,90 @@ func TestJoinTxtStrings(t *testing.T) {
 		}
 	}
 }
+
+func TestNextNamesAreSignedAndReturned(t *testing.T) {
+	k := key(t)
+	recs, err := BuildRecordsOpts(k, manyNodes(2), time.Now(), time.Hour, Options{Next: []string{"a.example.com", "b.example.org"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := VerifyRecords(recs, &k.PublicKey, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Next) != 2 || p.Next[1] != "b.example.org" {
+		t.Fatalf("next: %v", p.Next)
+	}
+}
+
+func TestASealedListIsUnreadableWithoutTheKeyAndVerifiesWithIt(t *testing.T) {
+	k := key(t)
+	seal, _ := NewSealKey()
+	recs, err := BuildRecordsOpts(k, manyNodes(3), time.Now(), time.Hour, Options{SealKey: seal, Next: []string{"a.example.com"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range recs {
+		if strings.Contains(r, "10.0.0.") {
+			t.Fatal("node address visible in a sealed record")
+		}
+	}
+	if !IsRecord(recs[0]) {
+		t.Fatal("a sealed record must still look like one of ours (the panel replaces only those)")
+	}
+	if _, err := VerifyRecords(recs, &k.PublicKey, time.Now()); err == nil {
+		t.Fatal("a sealed list verified without the key")
+	}
+	other, _ := NewSealKey()
+	if _, err := VerifyRecordsSealed(recs, &k.PublicKey, time.Now(), other); err == nil {
+		t.Fatal("a sealed list verified with the wrong key")
+	}
+	p, err := VerifyRecordsSealed(recs, &k.PublicKey, time.Now(), seal)
+	if err != nil || len(p.Nodes) != 3 || p.Next[0] != "a.example.com" {
+		t.Fatalf("%v %+v", err, p)
+	}
+}
+
+func TestAnUnsealedListStillVerifiesForAnAppThatHasTheKey(t *testing.T) {
+	k := key(t)
+	seal, _ := NewSealKey()
+	recs, _ := BuildRecords(k, manyNodes(2), time.Now(), time.Hour)
+	if _, err := VerifyRecordsSealed(recs, &k.PublicKey, time.Now(), seal); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestATamperedSealedListIsRejected(t *testing.T) {
+	k := key(t)
+	seal, _ := NewSealKey()
+	recs, _ := BuildRecordsOpts(k, manyNodes(2), time.Now(), time.Hour, Options{SealKey: seal})
+	r := []byte(recs[0])
+	r[40] ^= 1
+	if r[40] == '.' || r[40] == 0 {
+		r[40] = 'A'
+	}
+	if _, err := VerifyRecordsSealed([]string{string(r)}, &k.PublicKey, time.Now(), seal); err == nil {
+		t.Fatal("tampered sealed list accepted")
+	}
+}
+
+func TestAppConfigSealsAndOpens(t *testing.T) {
+	c := AppConfig{Name: "wap.example.com", Fallbacks: []string{"b.example.org"}, PublicKey: "PUB", ListKey: "KEY"}
+	blob, err := SealConfig("hunter2", c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(blob, "example") {
+		t.Fatal("names visible in the sealed config")
+	}
+	got, err := OpenConfig("hunter2", blob)
+	if err != nil || got.Name != c.Name || got.Fallbacks[0] != "b.example.org" || got.ListKey != "KEY" {
+		t.Fatalf("%v %+v", err, got)
+	}
+	if _, err := OpenConfig("wrong", blob); err == nil {
+		t.Fatal("opened with the wrong passphrase")
+	}
+	if _, err := SealConfig("", c); err == nil {
+		t.Fatal("sealed with an empty passphrase")
+	}
+}

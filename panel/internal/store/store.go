@@ -63,6 +63,7 @@ type Cluster struct {
 	RenewBeforeDays int         `json:"renew_before_days"` // re-sign this long before it expires
 	AutoPublish     bool        `json:"auto_publish"`      // after a first manual publish
 	PublicKey       string      `json:"public_key"`        // for the apps; the private key is in the vault
+	Sealed          bool        `json:"sealed,omitempty"`  // encrypt the published list (key in the vault)
 	Notes           string      `json:"notes,omitempty"`
 	Created         time.Time   `json:"created"`
 	Last            Published   `json:"last"`

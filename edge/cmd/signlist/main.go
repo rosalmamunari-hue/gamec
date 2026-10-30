@@ -15,6 +15,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -22,6 +23,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"gamec/edge/shieldlist"
@@ -89,7 +91,7 @@ func dohHandler(records []string) http.Handler {
 }
 
 // checkDNS fetches the published records the way an app does and verifies them.
-func checkDNS(name, pub, doh string) {
+func checkDNS(name, pub, doh string, seal []byte) {
 	if pub == "" {
 		log.Fatal("-check needs -pub <base64 public key>")
 	}
@@ -122,7 +124,7 @@ func checkDNS(name, pub, doh string) {
 		}
 	}
 	fmt.Printf("DoH status %d, %d TXT record(s) at %s\n", reply.Status, len(recs), name)
-	p, err := shieldlist.VerifyRecords(recs, pk, time.Now())
+	p, err := shieldlist.VerifyRecordsSealed(recs, pk, time.Now(), seal)
 	if err != nil {
 		fmt.Println("FAIL:", err)
 		os.Exit(1)
@@ -143,11 +145,46 @@ func main() {
 	serve := flag.String("serve", "", "also serve the records as a fake DoH server on this address (tests)")
 	checkName := flag.String("check", "", "fetch this DNS name's TXT records over DoH and verify them (needs -pub)")
 	pubKey := flag.String("pub", "", "base64 public key to verify against (with -check)")
+	next := flag.String("next", "", "comma-separated names the apps should read from next time (put every name you publish to)")
+	sealKey := flag.String("seal-key", "", "base64 32-byte key: encrypt the list (apps need the same key as listKey)")
+	sealCfg := flag.String("seal-config", "", "print the app config (names + keys) as one opaque string, locked with this passphrase; needs -name -pub, optionally -fallback and -seal-key")
+	cfgName := flag.String("name", "", "with -seal-config: the first name the app reads the list from")
+	cfgFallback := flag.String("fallback", "", "with -seal-config: comma-separated backup names")
+	genSeal := flag.Bool("gen-seal-key", false, "print a new random seal key and exit")
 	dohURL := flag.String("doh", "https://cloudflare-dns.com/dns-query", "DoH JSON endpoint (with -check)")
 	flag.Parse()
 
+	if *genSeal {
+		k, err := shieldlist.NewSealKey()
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println(base64.StdEncoding.EncodeToString(k))
+		return
+	}
+	if *sealCfg != "" {
+		c := shieldlist.AppConfig{Name: strings.ToLower(strings.TrimSpace(*cfgName)), PublicKey: strings.TrimSpace(*pubKey), ListKey: strings.TrimSpace(*sealKey)}
+		for _, n := range strings.Split(*cfgFallback, ",") {
+			if n = strings.ToLower(strings.TrimSpace(n)); n != "" {
+				c.Fallbacks = append(c.Fallbacks, n)
+			}
+		}
+		blob, err := shieldlist.SealConfig(*sealCfg, c)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println(blob)
+		return
+	}
+	var seal []byte
+	if *sealKey != "" {
+		var err error
+		if seal, err = base64.StdEncoding.DecodeString(strings.TrimSpace(*sealKey)); err != nil || len(seal) != 32 {
+			log.Fatal("-seal-key must be 32 bytes in base64 (make one with -gen-seal-key)")
+		}
+	}
 	if *checkName != "" {
-		checkDNS(*checkName, *pubKey, *dohURL)
+		checkDNS(*checkName, *pubKey, *dohURL, seal)
 		return
 	}
 
@@ -184,11 +221,17 @@ func main() {
 		log.Fatal(err)
 	}
 	valid := time.Duration(*days) * 24 * time.Hour
-	recs, err := shieldlist.BuildRecords(k, nodes, time.Now(), valid)
+	var nextNames []string
+	for _, n := range strings.Split(*next, ",") {
+		if n = strings.ToLower(strings.TrimSpace(n)); n != "" {
+			nextNames = append(nextNames, n)
+		}
+	}
+	recs, err := shieldlist.BuildRecordsOpts(k, nodes, time.Now(), valid, shieldlist.Options{Next: nextNames, SealKey: seal})
 	if err != nil {
 		log.Fatal(err)
 	}
-	if _, err := shieldlist.VerifyRecords(recs, &k.PublicKey, time.Now()); err != nil {
+	if _, err := shieldlist.VerifyRecordsSealed(recs, &k.PublicKey, time.Now(), seal); err != nil {
 		log.Fatalf("self-check failed: %v", err)
 	}
 

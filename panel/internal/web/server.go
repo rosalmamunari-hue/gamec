@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"embed"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"html/template"
@@ -297,6 +298,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /cluster/{id}/probe", s.need(true, s.probeNow))
 	mux.HandleFunc("POST /cluster/{id}/publish", s.need(true, s.publishNow))
 	mux.HandleFunc("POST /cluster/{id}/auto", s.need(true, s.autoToggle))
+	mux.HandleFunc("POST /cluster/{id}/seal", s.need(true, s.sealToggle))
 	mux.HandleFunc("POST /cluster/{id}/target", s.need(true, s.targetAdd))
 	mux.HandleFunc("POST /cluster/{id}/target/{idx}/delete", s.need(true, s.targetDelete))
 
@@ -453,8 +455,9 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request, _ *auth.Sessi
 }
 
 type clusterPageData struct {
-	Row    clusterRow
-	Others []string
+	Row     clusterRow
+	Others  []string
+	SealKey string // shown only while the cluster encrypts its list and the vault is unlocked
 }
 
 func (s *Server) clusterPage(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
@@ -471,8 +474,11 @@ func (s *Server) renderCluster(w http.ResponseWriter, r *http.Request, id, flash
 	if flash == "" {
 		flash = r.URL.Query().Get("ok")
 	}
-	s.render(w, r, "cluster.html", page{Title: c.Name, Flash: flash, Error: errMsg,
-		Data: clusterPageData{Row: s.clusterRow(st, c)}}, status)
+	data := clusterPageData{Row: s.clusterRow(st, c)}
+	if c.Sealed && !s.Vault.Sealed() {
+		data.SealKey, _, _ = s.Vault.Get(engine.SealKeyName(id))
+	}
+	s.render(w, r, "cluster.html", page{Title: c.Name, Flash: flash, Error: errMsg, Data: data}, status)
 }
 
 // ---------------------------------------------------------------- creating a cluster
@@ -719,6 +725,42 @@ func (s *Server) autoToggle(w http.ResponseWriter, r *http.Request, _ *auth.Sess
 	}
 	s.log(r, "auto-publish", fmt.Sprintf("cluster=%s on=%v", id, on), true)
 	s.back(w, r, id, "已儲存。")
+}
+
+// sealToggle turns on or off the encryption of the published list. The key is made the first time and kept.
+func (s *Server) sealToggle(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
+	id := r.PathValue("id")
+	on := r.FormValue("seal") == "1"
+	if on {
+		if s.Vault.Sealed() {
+			s.renderCluster(w, r, id, "", "請先解鎖保險庫。", http.StatusBadRequest)
+			return
+		}
+		if _, ok, _ := s.Vault.Get(engine.SealKeyName(id)); !ok {
+			k, err := shieldlist.NewSealKey()
+			if err == nil {
+				err = s.Vault.Set(engine.SealKeyName(id), base64.StdEncoding.EncodeToString(k))
+			}
+			if err != nil {
+				s.renderCluster(w, r, id, "", "無法產生加密金鑰："+err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+	}
+	err := s.Store.Mutate(func(st *store.State) error {
+		c := st.Cluster(id)
+		if c == nil {
+			return fmt.Errorf("沒有這個渠道")
+		}
+		c.Sealed = on
+		return nil
+	})
+	if err != nil {
+		s.renderCluster(w, r, id, "", err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.log(r, "seal-list", fmt.Sprintf("cluster=%s on=%v", id, on), true)
+	s.back(w, r, id, "已儲存。下一次「更新名單」開始生效。")
 }
 
 func (s *Server) targetAdd(w http.ResponseWriter, r *http.Request, _ *auth.Session) {

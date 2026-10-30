@@ -687,3 +687,29 @@ func TestEveryChangeIsAuditedWithWhoAndFromWhere(t *testing.T) {
 		t.Fatalf("n=%d err=%v", n, err)
 	}
 }
+
+func TestSealingTheListMakesAKeyShowsItAndCanBeSwitchedOff(t *testing.T) {
+	e := newEnv(t, false)
+	c := e.admin()
+	cl := e.seedCluster("official")
+	if st, _, _ := c.post("/cluster/"+cl.ID+"/seal", url.Values{"csrf": {c.csrf()}, "seal": {"1"}}, nil); st != http.StatusSeeOther {
+		t.Fatalf("seal on: %d", st)
+	}
+	if !e.st.Snapshot().Cluster(cl.ID).Sealed {
+		t.Fatal("not marked sealed")
+	}
+	key, ok, _ := e.vault.Get(engine.SealKeyName(cl.ID))
+	if !ok || key == "" {
+		t.Fatal("no key in the vault")
+	}
+	if _, body, _ := c.get("/cluster/" + cl.ID); !strings.Contains(html.UnescapeString(body), key) {
+		t.Fatal("the cluster page does not show the key the app needs")
+	}
+	if st, _, _ := c.post("/cluster/"+cl.ID+"/seal", url.Values{"csrf": {c.csrf()}, "seal": {"0"}}, nil); st != http.StatusSeeOther || e.st.Snapshot().Cluster(cl.ID).Sealed {
+		t.Fatal("seal off did not work")
+	}
+	again, _, _ := e.vault.Get(engine.SealKeyName(cl.ID))
+	if again != key {
+		t.Fatal("the key must be kept when sealing is switched off, so switching it on again does not break apps")
+	}
+}

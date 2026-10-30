@@ -149,6 +149,16 @@
   <dl>
     <dt>去哪些網域讀名單</dt><dd>{{range $c.Targets}}<code>{{.Name}}</code> {{end}}</dd>
     <dt>驗證名單真假的公鑰（公開的，不是祕密）</dt><dd><code class="wrap">{{$c.PublicKey}}</code></dd>
+    {{if $c.Sealed}}<dt>名單解密金鑰（App 要用它才讀得懂名單）</dt><dd>{{if .Data.SealKey}}<code class="wrap">{{.Data.SealKey}}</code>{{else}}<span class="muted">解鎖保險庫後才顯示。</span>{{end}}</dd>{{end}}
   </dl>
+  {{if $p.Admin}}
+  <h3>加密名單</h3>
+  <p class="muted small">預設名單只有簽名、沒有加密：任何人只要知道域名，就能讀到所有節點的 IP。開啟後，名單內容會加密，沒有解密金鑰的人（比如只看 DNS 紀錄的人）看不懂。金鑰要放進 App，所以這只是提高門檻，不是絕對安全。<b>開啟後要把金鑰填進 App 的 <code>listKey</code> 並重新發版</b>；沒更新的舊 App 之後就讀不到名單了，請在新版本鋪開後再開。</p>
+  <form method="post" action="/cluster/{{$c.ID}}/seal" class="inline">
+    <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+    <input type="hidden" name="seal" value="{{if $c.Sealed}}0{{else}}1{{end}}">
+    <button{{if not $c.Sealed}} class="primary"{{end}}>{{if $c.Sealed}}關閉加密{{else}}開啟加密{{end}}</button>
+  </form>
+  {{end}}
 </section>
 {{template "foot" .}}

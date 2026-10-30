@@ -42,6 +42,11 @@ class DiscoveryConfig(
     /** Stable random id for this install; see [DeviceId.getOrCreate]. */
     val deviceId: String,
     /**
+     * Key (base64, 32 bytes) for lists the panel encrypts; null = the list is not encrypted. Lists that are
+     * not encrypted are read either way.
+     */
+    val listKey: String? = null,
+    /**
      * Backup names holding the same list (put them under a different domain, ideally at a different DNS
      * provider). Tried in order when [name] cannot be read or its list does not verify.
      */

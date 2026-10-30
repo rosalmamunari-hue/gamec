@@ -6,6 +6,9 @@ import java.security.KeyFactory
 import java.security.Signature
 import java.security.spec.X509EncodedKeySpec
 import java.util.Base64
+import javax.crypto.Cipher
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
 /** Where the last good record set is kept so the app can start while DNS is unreachable. */
 interface ListStore {
@@ -21,7 +24,11 @@ class PrefsListStore(context: Context) : ListStore {
     }
 }
 
-internal class NodeList(val nodes: List<Node>, val iat: Long, val exp: Long, val records: List<String>)
+internal class NodeList(
+    val nodes: List<Node>, val iat: Long, val exp: Long, val records: List<String>,
+    /** Names the panel says to read from next time; the ones built into the app are then only a fallback. */
+    val next: List<String> = emptyList(),
+)
 
 /**
  * Parses the signed node list published as DNS TXT records (see edge/cmd/signlist for the format).
@@ -33,7 +40,7 @@ internal object ListVerifier {
     private val bareRe = Regex("^[A-Za-z0-9_-]{16,}\\.[A-Za-z0-9_-]{16,}$")
     fun isRecord(r: String) = recordRe.containsMatchIn(r) || bareRe.matches(r)
 
-    fun parse(records: List<String>, publicKeyB64: String, nowSec: Long): NodeList {
+    fun parse(records: List<String>, publicKeyB64: String, nowSec: Long, listKeyB64: String? = null): NodeList {
         // part index -> data, grouped by the total the record claims; only complete groups are tried
         val groups = HashMap<Int, HashMap<Int, String>>()
         val dup = HashSet<Int>()
@@ -60,7 +67,7 @@ internal object ListVerifier {
             if (n in dup || parts.size != n) continue
             try {
                 val body = (1..n).joinToString("") { parts[it]!! }
-                val l = verify(body, publicKeyB64, nowSec, records.filter { isRecord(it) })
+                val l = verify(body, publicKeyB64, nowSec, records.filter { isRecord(it) }, listKeyB64)
                 if (best == null || l.iat > best.iat) best = l
             } catch (e: Exception) {
                 lastError = e
@@ -69,10 +76,24 @@ internal object ListVerifier {
         return best ?: throw lastError
     }
 
-    private fun verify(body: String, publicKeyB64: String, nowSec: Long, used: List<String>): NodeList {
+    /** nonce(12) || ciphertext || tag, AES-256-GCM; null when [data] is not sealed with [keyB64]. */
+    private fun unseal(data: ByteArray, keyB64: String): ByteArray? {
+        if (data.size <= 12 + 16) return null
+        return try {
+            val c = Cipher.getInstance("AES/GCM/NoPadding")
+            c.init(Cipher.DECRYPT_MODE, SecretKeySpec(Base64.getDecoder().decode(keyB64), "AES"), GCMParameterSpec(128, data, 0, 12))
+            c.doFinal(data, 12, data.size - 12)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun verify(body: String, publicKeyB64: String, nowSec: Long, used: List<String>, listKeyB64: String?): NodeList {
         val f = body.split(".", limit = 2)
         if (f.size != 2) throw IllegalArgumentException("malformed list")
-        val payload = b64.decode(f[0])
+        val first = b64.decode(f[0])
+        // an unsealed list simply fails to decrypt and is checked as it is: the signature decides
+        val payload = (if (listKeyB64 != null) unseal(first, listKeyB64) else null) ?: first
         val sig = b64.decode(f[1])
         val pub = KeyFactory.getInstance("EC")
             .generatePublic(X509EncodedKeySpec(Base64.getDecoder().decode(publicKeyB64)))
@@ -91,7 +112,8 @@ internal object ListVerifier {
             Node(n.getString("h"), n.getInt("p"), n.getString("k"))
         }
         if (nodes.isEmpty()) throw IllegalStateException("empty node list")
-        return NodeList(nodes, p.getLong("iat"), exp, used)
+        val next = p.optJSONArray("next")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
+        return NodeList(nodes, p.getLong("iat"), exp, used, next)
     }
 }
 
@@ -111,7 +133,7 @@ internal class NodeDirectory(
     init {
         try {
             val saved = cfg.store?.load().orEmpty()
-            if (saved.isNotEmpty()) current = ListVerifier.parse(saved, cfg.publicKey, clock())
+            if (saved.isNotEmpty()) current = ListVerifier.parse(saved, cfg.publicKey, clock(), cfg.listKey)
         } catch (_: Exception) {
             // a bad or expired saved list is simply not used
         }
@@ -132,6 +154,10 @@ internal class NodeDirectory(
         return fetch(now)
     }
 
+    /** The names the last good list pointed to come first; the ones built into the app are the fallback. */
+    private fun names(): List<String> =
+        ((current?.next ?: emptyList()) + cfg.name + cfg.fallbackNames).distinct()
+
     private fun usable(now: Long): NodeList? = current?.takeIf { now <= it.exp }
 
     private fun fetch(now: Long): NodeList? {
@@ -139,9 +165,9 @@ internal class NodeDirectory(
         val c = current
         try {
             var fresh: NodeList? = null
-            for (n in listOf(cfg.name) + cfg.fallbackNames) {
+            for (n in names()) {
                 try {
-                    val f = ListVerifier.parse(queryTxt(n), cfg.publicKey, now)
+                    val f = ListVerifier.parse(queryTxt(n), cfg.publicKey, now, cfg.listKey)
                     if (c != null && f.iat < c.iat) continue // stale copy at this name; try the next
                     fresh = f
                     break

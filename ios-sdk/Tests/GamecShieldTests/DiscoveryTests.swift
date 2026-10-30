@@ -16,11 +16,13 @@ final class DiscoveryTests: XCTestCase {
 
     /// Same format as edge/cmd/signlist.
     private func records(_ key: P256.Signing.PrivateKey, _ nodes: [Node], iat: Int64 = 100, exp: Int64 = 10_000,
-                         chunk: Int = 200) throws -> [String] {
+                         chunk: Int = 200, seal: Data? = nil, next: [String] = []) throws -> [String] {
         let list = nodes.map { "{\"h\":\"\($0.host)\",\"p\":\($0.port),\"k\":\"\($0.pinSha256)\"}" }.joined(separator: ",")
-        let payload = Data("{\"v\":1,\"iat\":\(iat),\"exp\":\(exp),\"nodes\":[\(list)]}".utf8)
+        let nextJson = next.isEmpty ? "" : ",\"next\":[" + next.map { "\"\($0)\"" }.joined(separator: ",") + "]"
+        let payload = Data("{\"v\":1,\"iat\":\(iat),\"exp\":\(exp),\"nodes\":[\(list)]\(nextJson)}".utf8)
         let sig = try key.signature(for: payload).derRepresentation
-        let body = b64url(payload) + "." + b64url(sig)
+        let first = try seal.map { try AES.GCM.seal(payload, using: SymmetricKey(data: $0)).combined! } ?? payload
+        let body = b64url(first) + "." + b64url(sig)
         var parts: [String] = []
         var rest = Substring(body)
         while !rest.isEmpty {
@@ -207,6 +209,56 @@ final class DiscoveryTests: XCTestCase {
         down = true
         now = 1010
         XCTAssertEqual(d.refreshNow()?.nodes.count, 2)
+    }
+
+    private let sealKey = Data((0..<32).map { UInt8(($0 * 7 + 1) & 0xff) })
+
+    func testASealedListIsReadWithTheKeyAndNotWithout() throws {
+        let k = P256.Signing.PrivateKey()
+        let recs = try records(k, nodes(2), seal: sealKey, next: ["a.example.com"])
+        let l = try ListVerifier.parse(recs, publicKeyB64: pub(k), now: 1000, listKeyB64: sealKey.base64EncodedString())
+        XCTAssertEqual(l.nodes.count, 2)
+        XCTAssertEqual(l.next, ["a.example.com"])
+        XCTAssertThrowsError(try ListVerifier.parse(recs, publicKeyB64: pub(k), now: 1000))
+        XCTAssertThrowsError(try ListVerifier.parse(recs, publicKeyB64: pub(k), now: 1000,
+                                                    listKeyB64: Data(repeating: 9, count: 32).base64EncodedString()))
+    }
+
+    func testAnUnsealedListIsStillReadWhenTheAppHasAKey() throws {
+        let k = P256.Signing.PrivateKey()
+        let l = try ListVerifier.parse(try records(k, nodes(2)), publicKeyB64: pub(k), now: 1000,
+                                       listKeyB64: sealKey.base64EncodedString())
+        XCTAssertEqual(l.nodes.count, 2)
+    }
+
+    /// Produced by the real edge code (shieldlist.BuildRecordsOpts), so the three implementations agree.
+    func testAListSealedByTheGoCodeIsReadHere() throws {
+        let l = try ListVerifier.parse(["H-3PAVCeWiLgF4DGa3WB3ls1Vt2Cjk96hH7LlwthyF5HnxEn6fcOti2CtWiGTFZQSYGFleSVr7ML3ySiOuaTQuDRO5qKzhhn3oMH0vfWWiE9YzfhdR8mg7HtxeLhIWTe5s_klGflW8Xbf-3GRHqXyMW3IVSodJtPmeNJDLz4PBhNtm6SnOklAwbgXEk_q8o1cTm18KOQpvoheImVTryY2tBbvvotsgRBixCMBHmHIofJXCxmUF9ifDDGrEd3SbM5LXRRi-EIVu34wUmO6uodVa7t5wh5i_2BVLbBKwgvKNHV0MIiby6ywVUukz8QCkgGSfA9YDfj4sn9ceDRF8LRtVR6Hb2itXeknIRYg-tQheZm1ul-2ot3Fk_Q.MEYCIQCuYiJmLJRmk2zLB-MOyrolvzor6HdO7gjytjIzU10xhwIhANlUtGtPhscP_hxWSCgfdLKaBmqZ5IK3HLWUIsm2azNp"], publicKeyB64: "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEg9foO49lkwJzQHUxjO94nZacXGuscx7TtH1FXcYCTVhEHWy0CYv3R/q4bybQlLq0FCVm2fqzJWVq0ziC2SqfUw==",
+                                       now: 1_800_000_100, listKeyB64: "2ifha0amWCENeA9BaHSezf4XPI3+iClFTHs9S+u3680=")
+        XCTAssertEqual(l.nodes.map { $0.host }, ["203.0.113.7", "203.0.113.8"])
+        XCTAssertEqual(l.nodes[0].port, 41234)
+        XCTAssertEqual(l.next, ["a.example.com", "b.example.org"])
+    }
+
+    func testTheNamesTheListPointsToAreTriedFirstAndTheBuiltInOnesAreTheFallback() throws {
+        let k = P256.Signing.PrivateKey()
+        var asked: [String] = []
+        var down = false
+        var now: Int64 = 1000
+        let c = try DiscoveryConfig(name: "seed.example.com", publicKey: pub(k), deviceId: "device-1234567890abcdef",
+                                    fallbackNames: ["seed2.example.com"])
+        let recs = try records(k, nodes(2), iat: 900, exp: 99_999, next: ["new.example.com"])
+        let d = NodeDirectory(cfg: c, queryTxt: { n in
+            asked.append(n)
+            return (down && n != "seed2.example.com") ? [] : recs
+        }, clock: { now })
+        _ = d.get()
+        XCTAssertEqual(asked, ["seed.example.com"])
+        asked = []
+        down = true
+        now = 1010
+        _ = d.refreshNow()
+        XCTAssertEqual(asked, ["new.example.com", "seed.example.com", "seed2.example.com"])
     }
 
     func testDirectoryNeverGoesBackToAnOlderList() throws {

@@ -61,6 +61,9 @@ public struct DiscoveryConfig {
     public let publicKey: String
     /// Stable random id for this install; see `DeviceID.getOrCreate()`.
     public let deviceId: String
+    /// Key (base64, 32 bytes) for lists the panel encrypts; nil = the list is not encrypted. Lists that are not
+    /// encrypted are read either way.
+    public let listKey: String?
     /// Backup names holding the same list (put them under a different domain, ideally at a different DNS
     /// provider). Tried in order when `name` cannot be read or its list does not verify.
     public let fallbackNames: [String]
@@ -86,6 +89,7 @@ public struct DiscoveryConfig {
     public let store: ListStore?
 
     public init(name: String, publicKey: String, deviceId: String,
+                listKey: String? = nil,
                 fallbackNames: [String] = [],
                 dohProviders: [String] = DnsDefaults.doh,
                 dotServers: [String] = DnsDefaults.dot,
@@ -99,6 +103,7 @@ public struct DiscoveryConfig {
         self.name = name
         self.publicKey = publicKey
         self.deviceId = deviceId
+        self.listKey = listKey
         self.fallbackNames = fallbackNames
         self.dohProviders = dohProviders
         self.dotServers = dotServers

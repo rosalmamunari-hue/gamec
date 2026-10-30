@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"crypto/ecdsa"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -652,5 +653,48 @@ func TestActiveNodesAreNeverMixedAcrossClusters(t *testing.T) {
 	e.addNode(b, "b1")
 	if got := e.active(a); len(got) != 1 || got[0].ID != a1.ID {
 		t.Fatalf("%v", got)
+	}
+}
+
+func TestPublishCarriesTheTargetNamesAsNextAndCanSealTheList(t *testing.T) {
+	e := newEnv(t)
+	c := e.addCluster("official")
+	a := e.addNode(c, "hk-1")
+
+	res, err := e.pub.Publish(context.Background(), c.ID, []*store.Node{a}, "alice", "", "x")
+	if err != nil || !res.OK {
+		t.Fatalf("%v %+v", err, res)
+	}
+	pk, _ := shieldlist.ParsePublicKeyB64(e.cluster(c.ID).PublicKey)
+	pl, err := shieldlist.VerifyRecords(e.provFor(c).last(), pk, e.now)
+	if err != nil || len(pl.Next) != 1 || pl.Next[0] != c.Targets[0].Name {
+		t.Fatalf("%v next=%v", err, pl)
+	}
+
+	// sealed: the key lives in the vault, the plain check no longer reads it
+	seal, _ := shieldlist.NewSealKey()
+	if err := e.v.Set(SealKeyName(c.ID), base64.StdEncoding.EncodeToString(seal)); err != nil {
+		t.Fatal(err)
+	}
+	e.st.Mutate(func(s *store.State) error { s.Cluster(c.ID).Sealed = true; return nil })
+	if res, err = e.pub.Publish(context.Background(), c.ID, []*store.Node{a}, "alice", "", "x"); err != nil || !res.OK {
+		t.Fatalf("%v %+v", err, res)
+	}
+	sent := e.provFor(c).last()
+	if _, err := shieldlist.VerifyRecords(sent, pk, e.now); err == nil {
+		t.Fatal("sealed list readable without the key")
+	}
+	if _, err := shieldlist.VerifyRecordsSealed(sent, pk, e.now, seal); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPublishRefusesToSealWithoutAKey(t *testing.T) {
+	e := newEnv(t)
+	c := e.addCluster("official")
+	a := e.addNode(c, "hk-1")
+	e.st.Mutate(func(s *store.State) error { s.Cluster(c.ID).Sealed = true; return nil })
+	if _, err := e.pub.Publish(context.Background(), c.ID, []*store.Node{a}, "alice", "", "x"); err == nil {
+		t.Fatal("published a plain list for a cluster that must be sealed")
 	}
 }

@@ -22,17 +22,25 @@ class DiscoveryTest {
 
     private fun nodes(n: Int) = (1..n).map { Node("10.0.0.$it", 30800, "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefg=") }
 
-    /** Same format as edge/cmd/signlist. */
-    private fun records(key: KeyPair, nodes: List<Node>, iat: Long = 100, exp: Long = 10_000, chunk: Int = 200): List<String> {
+    /** Same format as edge/cmd/signlist; [seal] (32 bytes) encrypts the payload, [next] adds the next names. */
+    private fun records(key: KeyPair, nodes: List<Node>, iat: Long = 100, exp: Long = 10_000, chunk: Int = 200,
+                        seal: ByteArray? = null, next: List<String> = emptyList()): List<String> {
         val nodesJson = nodes.joinToString(",") { "{\"h\":\"${it.host}\",\"p\":${it.port},\"k\":\"${it.pinSha256}\"}" }
-        val payload = "{\"v\":1,\"iat\":$iat,\"exp\":$exp,\"nodes\":[$nodesJson]}".toByteArray()
+        val nextJson = if (next.isEmpty()) "" else ",\"next\":[" + next.joinToString(",") { "\"$it\"" } + "]"
+        val payload = "{\"v\":1,\"iat\":$iat,\"exp\":$exp,\"nodes\":[$nodesJson]$nextJson}".toByteArray()
         val sig = Signature.getInstance("SHA256withECDSA").run {
             initSign(key.private)
             update(payload)
             sign()
         }
         val enc = Base64.getUrlEncoder().withoutPadding()
-        val chunks = (enc.encodeToString(payload) + "." + enc.encodeToString(sig)).chunked(chunk)
+        val first = if (seal == null) payload else {
+            val nonce = ByteArray(12).also { java.security.SecureRandom().nextBytes(it) }
+            val c = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+            c.init(javax.crypto.Cipher.ENCRYPT_MODE, javax.crypto.spec.SecretKeySpec(seal, "AES"), javax.crypto.spec.GCMParameterSpec(128, nonce))
+            nonce + c.doFinal(payload)
+        }
+        val chunks = (enc.encodeToString(first) + "." + enc.encodeToString(sig)).chunked(chunk)
         if (chunks.size == 1) return chunks // a list that fits is one bare record, like the edge tools make
         return chunks.mapIndexed { i, c -> "${i + 1}/${chunks.size}:$c" }
     }
@@ -232,6 +240,57 @@ class DiscoveryTest {
         down = true
         now = 1010
         assertEquals(2, d.refreshNow()!!.nodes.size)
+    }
+
+    private val sealKey = ByteArray(32) { (it * 7 + 1).toByte() }
+    private val sealKeyB64 = Base64.getEncoder().encodeToString(sealKey)
+
+    @Test
+    fun aSealedListIsReadWithTheKeyAndNotWithout() {
+        val k = newKey()
+        val recs = records(k, nodes(2), seal = sealKey, next = listOf("a.example.com"))
+        val l = ListVerifier.parse(recs, pub(k), 1000, sealKeyB64)
+        assertEquals(2, l.nodes.size)
+        assertEquals(listOf("a.example.com"), l.next)
+        assertRejected { ListVerifier.parse(recs, pub(k), 1000) }
+        assertRejected { ListVerifier.parse(recs, pub(k), 1000, Base64.getEncoder().encodeToString(ByteArray(32) { 9 })) }
+    }
+
+    @Test
+    fun anUnsealedListIsStillReadWhenTheAppHasAKey() {
+        val k = newKey()
+        assertEquals(2, ListVerifier.parse(records(k, nodes(2)), pub(k), 1000, sealKeyB64).nodes.size)
+    }
+
+    /** Produced by the real edge code (shieldlist.BuildRecordsOpts), so the three implementations agree. */
+    @Test
+    fun aListSealedByTheGoCodeIsReadHere() {
+        val recs = listOf("H-3PAVCeWiLgF4DGa3WB3ls1Vt2Cjk96hH7LlwthyF5HnxEn6fcOti2CtWiGTFZQSYGFleSVr7ML3ySiOuaTQuDRO5qKzhhn3oMH0vfWWiE9YzfhdR8mg7HtxeLhIWTe5s_klGflW8Xbf-3GRHqXyMW3IVSodJtPmeNJDLz4PBhNtm6SnOklAwbgXEk_q8o1cTm18KOQpvoheImVTryY2tBbvvotsgRBixCMBHmHIofJXCxmUF9ifDDGrEd3SbM5LXRRi-EIVu34wUmO6uodVa7t5wh5i_2BVLbBKwgvKNHV0MIiby6ywVUukz8QCkgGSfA9YDfj4sn9ceDRF8LRtVR6Hb2itXeknIRYg-tQheZm1ul-2ot3Fk_Q.MEYCIQCuYiJmLJRmk2zLB-MOyrolvzor6HdO7gjytjIzU10xhwIhANlUtGtPhscP_hxWSCgfdLKaBmqZ5IK3HLWUIsm2azNp")
+        val l = ListVerifier.parse(recs, "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEg9foO49lkwJzQHUxjO94nZacXGuscx7TtH1FXcYCTVhEHWy0CYv3R/q4bybQlLq0FCVm2fqzJWVq0ziC2SqfUw==", 1_800_000_100, "2ifha0amWCENeA9BaHSezf4XPI3+iClFTHs9S+u3680=")
+        assertEquals(listOf("203.0.113.7", "203.0.113.8"), l.nodes.map { it.host })
+        assertEquals(41234, l.nodes[0].port)
+        assertEquals(listOf("a.example.com", "b.example.org"), l.next)
+    }
+
+    @Test
+    fun theNamesTheListPointsToAreTriedFirstAndTheBuiltInOnesAreTheFallback() {
+        val k = newKey()
+        val asked = mutableListOf<String>()
+        val c = DiscoveryConfig("seed.example.com", pub(k), "device-1234567890abcdef", fallbackNames = listOf("seed2.example.com"))
+        var down = false
+        var now = 1000L
+        val d = NodeDirectory(c, { n ->
+            asked += n
+            if (down && n != "seed2.example.com") emptyList()
+            else records(k, nodes(2), iat = 900, exp = 99_999, next = listOf("new.example.com"))
+        }, { now })
+        d.get()                              // first read: only the built-in names are known
+        assertEquals(listOf("seed.example.com"), asked)
+        asked.clear()
+        down = true
+        now = 1010
+        d.refreshNow()                       // now the list's own name goes first, the seeds are the fallback
+        assertEquals(listOf("new.example.com", "seed.example.com", "seed2.example.com"), asked)
     }
 
     @Test

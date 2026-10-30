@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"crypto/ecdsa"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,10 +24,16 @@ import (
 // Secret names in the vault.
 func SigningKeyName(clusterID string) string { return "cluster/" + clusterID + "/signing_key" }
 func NodeSecretName(clusterID string) string { return "cluster/" + clusterID + "/node_secret" }
+func SealKeyName(clusterID string) string    { return "cluster/" + clusterID + "/seal_key" }
 
 // Verifier checks, from outside, that what was published can be read back and verifies.
 type Verifier interface {
 	Verify(ctx context.Context, fqdn string, pub *ecdsa.PublicKey, wantIat int64) error
+}
+
+// SealedVerifier is a Verifier that can also read back a sealed list.
+type SealedVerifier interface {
+	VerifySealed(ctx context.Context, fqdn string, pub *ecdsa.PublicKey, wantIat int64, sealKey []byte) error
 }
 
 type TargetResult struct {
@@ -134,11 +141,24 @@ func (p *Publisher) Publish(ctx context.Context, clusterID string, nodes []*stor
 	}
 	now := p.now()
 	valid := time.Duration(c.ValidDays) * 24 * time.Hour
-	recs, err := shieldlist.BuildRecords(key, list, now, valid)
+	opts := shieldlist.Options{Next: targetNames(c.Targets)}
+	if c.Sealed {
+		rawSeal, ok, err := p.Vault.Get(SealKeyName(clusterID))
+		if err != nil {
+			return fail(err)
+		}
+		if !ok {
+			return fail(errors.New("this cluster is set to encrypt its list but has no key in the vault"))
+		}
+		if opts.SealKey, err = base64.StdEncoding.DecodeString(strings.TrimSpace(rawSeal)); err != nil {
+			return fail(fmt.Errorf("seal key: %w", err))
+		}
+	}
+	recs, err := shieldlist.BuildRecordsOpts(key, list, now, valid, opts)
 	if err != nil {
 		return fail(err)
 	}
-	if _, err := shieldlist.VerifyRecords(recs, &key.PublicKey, now); err != nil {
+	if _, err := shieldlist.VerifyRecordsSealed(recs, &key.PublicKey, now, opts.SealKey); err != nil {
 		return fail(fmt.Errorf("self-check of the signed list failed: %w", err))
 	}
 	res.Nodes, res.Records, res.Iat, res.Exp = nodeLabels(nodes), recs, now.Unix(), now.Add(valid).Unix()
@@ -155,7 +175,13 @@ func (p *Publisher) Publish(ctx context.Context, clusterID string, nodes []*stor
 		} else if err != nil {
 			tr.Err = err.Error()
 		} else if p.Verifier != nil {
-			if verr := p.Verifier.Verify(ctx, t.Name, &key.PublicKey, res.Iat); verr != nil {
+			var verr error
+			if sv, ok := p.Verifier.(SealedVerifier); ok && opts.SealKey != nil {
+				verr = sv.VerifySealed(ctx, t.Name, &key.PublicKey, res.Iat, opts.SealKey)
+			} else {
+				verr = p.Verifier.Verify(ctx, t.Name, &key.PublicKey, res.Iat)
+			}
+			if verr != nil {
 				tr.VerifyErr = verr.Error()
 			} else {
 				tr.Verified = true
@@ -289,6 +315,11 @@ func (v *DoHVerifier) query(ctx context.Context, base, name string) ([]string, e
 }
 
 func (v *DoHVerifier) Verify(ctx context.Context, fqdn string, pub *ecdsa.PublicKey, wantIat int64) error {
+	return v.VerifySealed(ctx, fqdn, pub, wantIat, nil)
+}
+
+// VerifySealed is Verify for a list sealed with sealKey.
+func (v *DoHVerifier) VerifySealed(ctx context.Context, fqdn string, pub *ecdsa.PublicKey, wantIat int64, sealKey []byte) error {
 	now := v.Now
 	if now == nil {
 		now = time.Now
@@ -302,7 +333,7 @@ func (v *DoHVerifier) Verify(ctx context.Context, fqdn string, pub *ecdsa.Public
 				last = err
 				continue
 			}
-			pl, err := shieldlist.VerifyRecords(recs, pub, now())
+			pl, err := shieldlist.VerifyRecordsSealed(recs, pub, now(), sealKey)
 			if err != nil {
 				last = err
 				continue
@@ -322,4 +353,17 @@ func (v *DoHVerifier) Verify(ctx context.Context, fqdn string, pub *ecdsa.Public
 		case <-time.After(v.Interval):
 		}
 	}
+}
+
+// targetNames are the names the apps should read the list from next time: every place the list is written to.
+func targetNames(ts []store.DNSTarget) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, t := range ts {
+		if t.Name != "" && !seen[t.Name] {
+			seen[t.Name] = true
+			out = append(out, t.Name)
+		}
+	}
+	return out
 }
