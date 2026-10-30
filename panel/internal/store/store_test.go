@@ -199,3 +199,47 @@ func writeFile(t *testing.T, path, content string) {
 		t.Fatal(err)
 	}
 }
+
+func TestSSHFieldsAreValidated(t *testing.T) {
+	c := cluster("official")
+	mk := func(f func(*Node)) State {
+		n := node(c, "a", "1.2.3.4", 30800)
+		f(n)
+		return State{Clusters: []*Cluster{c}, Nodes: []*Node{n}}
+	}
+	bad := map[string]State{
+		"user with a space":     mk(func(n *Node) { n.SSHUser = "root user" }),
+		"user with a semicolon": mk(func(n *Node) { n.SSHUser = "x;rm" }),
+		"upper case user":       mk(func(n *Node) { n.SSHUser = "Root" }),
+		"ssh port 70000":        mk(func(n *Node) { n.SSHUser = "u"; n.SSHPort = 70000 }),
+		"unit sshd":             mk(func(n *Node) { n.Unit = "sshd" }),
+		"unit with a path":      mk(func(n *Node) { n.Unit = "gamec-edge/../x" }),
+		"short host key":        mk(func(n *Node) { n.HostKey = "SHA256:abc" }),
+		"md5 host key":          mk(func(n *Node) { n.HostKey = "MD5:aa:bb:cc" }),
+	}
+	for what, st := range bad {
+		if err := st.Validate(); err == nil {
+			t.Errorf("%s accepted", what)
+		}
+	}
+	ok := mk(func(n *Node) {
+		n.SSHUser, n.SSHPort, n.Unit = "gamec-ops", 22, "gamec-edge-channel-a"
+		n.HostKey = "SHA256:" + strings.Repeat("A", 43)
+	})
+	if err := ok.Validate(); err != nil {
+		t.Fatalf("valid SSH settings refused: %v", err)
+	}
+	n := ok.Nodes[0]
+	if n.UnitName() != "gamec-edge-channel-a" || n.SSHAddr() != "1.2.3.4:22" || !n.SSHConfigured() {
+		t.Fatalf("%s %s %v", n.UnitName(), n.SSHAddr(), n.SSHConfigured())
+	}
+	plain := node(c, "p", "5.6.7.8", 30800)
+	if plain.UnitName() != "gamec-edge" || plain.SSHConfigured() {
+		t.Fatal("defaults are wrong")
+	}
+	v6 := node(c, "v6", "2001:db8::1", 30800)
+	v6.SSHPort = 2222
+	if v6.SSHAddr() != "[2001:db8::1]:2222" {
+		t.Fatalf("IPv6 needs brackets: %s", v6.SSHAddr())
+	}
+}

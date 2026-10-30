@@ -23,6 +23,7 @@ import (
 	"gamec/panel/internal/audit"
 	"gamec/panel/internal/auth"
 	"gamec/panel/internal/engine"
+	"gamec/panel/internal/ops"
 	"gamec/panel/internal/store"
 	"gamec/panel/internal/vault"
 )
@@ -41,6 +42,12 @@ type Server struct {
 	Pub       *engine.Publisher
 	Sched     *engine.Scheduler
 	Now       func() time.Time
+
+	// SSH management of nodes (optional).
+	Ops          *ops.Ops
+	Releases     *ops.Releases
+	ReleaseBase  string // like https://github.com/OWNER/REPO/releases/download
+	FetchHostKey func(addr string, timeout time.Duration) (fingerprint, keyType string, err error)
 
 	// Secure marks cookies Secure and sends HSTS: set it whenever the panel is served over HTTPS.
 	Secure bool
@@ -70,6 +77,7 @@ func (s *Server) init() {
 			"ms":       func(d time.Duration) string { return fmt.Sprintf("%d ms", d.Milliseconds()) },
 			"ts":       func(t time.Time) string { return t.UTC().Format("2006-01-02 15:04:05") },
 			"unixTime": func(u int64) time.Time { return time.Unix(u, 0) },
+			"list":     func(v ...string) []string { return v },
 		}
 		s.tpl = template.Must(template.New("").Funcs(funcs).ParseFS(assets, "templates/*.html"))
 		s.lim = newLimiter(10, 10*time.Minute)
@@ -283,6 +291,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /unseal", s.need(true, s.unsealForm))
 	mux.HandleFunc("POST /unseal", s.need(true, s.unsealSubmit))
 	mux.HandleFunc("GET /audit", s.need(false, s.auditPage))
+	s.routesSSH(mux)
 	return s.headers(mux)
 }
 

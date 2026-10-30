@@ -1,0 +1,25 @@
+{{template "head" .}}
+<section class="card">
+  <p class="muted">The panel manages nodes over SSH with one key of its own, as a restricted account that may run only <code>gamec-nodectl</code> (status, logs, start/stop/restart, install a checked version, roll back). It never needs a root password.</p>
+  {{if .Data.HasKey}}
+    <h2>The panel's public key</h2>
+    <p><code class="wrap">{{.Data.PublicLine}}</code></p>
+  {{else}}
+    <p class="alert">The panel has no SSH key yet. Create one on the panel's server with <code>panel ssh-keygen</code>.</p>
+  {{end}}
+</section>
+
+{{if .Data.HasKey}}
+<section class="card">
+  <h2>Prepare a server</h2>
+  <p>Generates a script for you to read and run <b>once, as root</b>, on each node's server. It creates the restricted account, allows only the panel's key, installs <code>gamec-nodectl</code> (checked against its checksum) and the one sudo rule.</p>
+  <form method="post" action="/ssh" class="stack">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>Release that contains nodectl <input name="tag" placeholder="v0.2.0" required></label>
+    <label>Only allow logins from this address (the panel's own address; recommended) <input name="from" placeholder="203.0.113.9"></label>
+    <button class="primary">Generate the script</button>
+  </form>
+  {{if .Data.Script}}<h2>Script</h2><pre>{{.Data.Script}}</pre>{{end}}
+</section>
+{{end}}
+{{template "foot" .}}

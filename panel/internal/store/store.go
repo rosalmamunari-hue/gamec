@@ -25,6 +25,9 @@ var (
 	idRe      = regexp.MustCompile(`^[a-f0-9]{8}$`)
 	dnsNameRe = regexp.MustCompile(`^([a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9])?)(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$`)
 	credRefRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,39}$`)
+	unitRe    = regexp.MustCompile(`^gamec-edge[a-z0-9-]{0,40}$`)
+	userRe    = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
+	hostKeyRe = regexp.MustCompile(`^SHA256:[A-Za-z0-9+/]{43}$`)
 	providers = map[string]bool{"manual": true, "spaceship": true, "cloudflare": true, "aliyun": true}
 )
 
@@ -73,13 +76,35 @@ type Node struct {
 	Pin           string    `json:"pin"`
 	Enabled       bool      `json:"enabled"`
 	DisabledUntil time.Time `json:"disabled_until,omitempty"` // temporary removal that ends by itself
-	SSHUser       string    `json:"ssh_user,omitempty"`
-	SSHPort       int       `json:"ssh_port,omitempty"`
+	SSHUser       string    `json:"ssh_user,omitempty"`       // the restricted account the panel logs in as
+	SSHPort       int       `json:"ssh_port,omitempty"`       // 0 means 22
+	Unit          string    `json:"unit,omitempty"`           // systemd unit of the edge service; empty means gamec-edge
+	HostKey       string    `json:"host_key,omitempty"`       // SHA256 fingerprint an administrator confirmed
 	Notes         string    `json:"notes,omitempty"`
 	Created       time.Time `json:"created"`
 }
 
 func (n *Node) Addr() string { return net.JoinHostPort(n.Host, fmt.Sprint(n.Port)) }
+
+// UnitName is the systemd unit of this node's edge service.
+func (n *Node) UnitName() string {
+	if n.Unit == "" {
+		return "gamec-edge"
+	}
+	return n.Unit
+}
+
+// SSHAddr is where the panel connects to manage the node.
+func (n *Node) SSHAddr() string {
+	port := n.SSHPort
+	if port == 0 {
+		port = 22
+	}
+	return net.JoinHostPort(n.Host, fmt.Sprint(port))
+}
+
+// SSHConfigured says whether the node has what the panel needs to manage it over SSH.
+func (n *Node) SSHConfigured() bool { return n.SSHUser != "" }
 
 // Key identifies what a client would connect to; it is what changes when the published list must change.
 func (n *Node) Key() string { return n.Addr() + ":" + n.Pin }
@@ -219,6 +244,18 @@ func (s State) Validate() error {
 		}
 		if !validPin(n.Pin) {
 			return fmt.Errorf("node %q: the pin must be base64 of 32 bytes (44 characters)", n.Name)
+		}
+		if n.SSHUser != "" && !userRe.MatchString(n.SSHUser) {
+			return fmt.Errorf("node %q: %q is not a valid account name", n.Name, n.SSHUser)
+		}
+		if n.SSHPort < 0 || n.SSHPort > 65535 {
+			return fmt.Errorf("node %q: SSH port out of range", n.Name)
+		}
+		if n.Unit != "" && !unitRe.MatchString(n.Unit) {
+			return fmt.Errorf("node %q: the service name must look like gamec-edge or gamec-edge-<name>", n.Name)
+		}
+		if n.HostKey != "" && !hostKeyRe.MatchString(n.HostKey) {
+			return fmt.Errorf("node %q: the host key fingerprint is not valid", n.Name)
 		}
 		if addrs[n.Addr()] {
 			return fmt.Errorf("%s is listed twice; a node address belongs to one cluster only", n.Addr())

@@ -1,0 +1,82 @@
+{{template "head" .}}
+{{$p := .}}
+{{$c := .Data.Cluster}}
+{{$n := .Data.Node}}
+<p><a href="/cluster/{{$c.ID}}">&larr; {{$c.Name}}</a></p>
+
+<section class="card">
+  <h2>{{$n.Name}} <span class="muted"><code>{{$n.Host}}:{{$n.Port}}</code></span></h2>
+  <p><span class="dot {{.Data.View.Status}}"></span> {{.Data.View.Detail}}{{if .Data.View.Latency}} &middot; {{.Data.View.Latency}}{{end}}</p>
+</section>
+
+<section class="card">
+  <h2>SSH settings</h2>
+  <p class="muted">The panel logs in as a restricted account with its own key and may run only <code>gamec-nodectl</code>. Prepare each server once with the script from <a href="/ssh">SSH management</a>.</p>
+  <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/ssh-settings" class="stack">
+    <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+    <label>Account <input name="ssh_user" value="{{$n.SSHUser}}" placeholder="gamec-ops"></label>
+    <label>SSH port (blank = 22) <input name="ssh_port" value="{{if $n.SSHPort}}{{$n.SSHPort}}{{end}}" size="6"></label>
+    <label>Service name (blank = gamec-edge) <input name="unit" value="{{$n.Unit}}" placeholder="gamec-edge"></label>
+    <button>Save</button>
+  </form>
+</section>
+
+{{if $n.SSHUser}}
+<section class="card">
+  <h2>Host key</h2>
+  {{if $n.HostKey}}<p>Confirmed: <code class="wrap">{{$n.HostKey}}</code></p>{{else}}<p class="alert">Not confirmed yet. Nothing is sent to this server until you confirm its key.</p>{{end}}
+  {{if .Data.Fingerprint}}
+    {{if .Data.KeyChanged}}<p class="alert"><b>This is different from the key you confirmed before.</b> Either the server was reinstalled or someone is intercepting the connection. Only continue if you know it was reinstalled.</p>{{end}}
+    <p>The server presents (<code>{{.Data.KeyType}}</code>):</p>
+    <p><code class="wrap">{{.Data.Fingerprint}}</code></p>
+    <p class="muted">Compare it with the output on the server of <code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</code> (the prepare script prints it too). Confirm only if they are the same.</p>
+    <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/hostkey" class="inline">
+      <input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="action" value="trust"><input type="hidden" name="fingerprint" value="{{.Data.Fingerprint}}">
+      <button class="primary">They match: trust this key</button>
+    </form>
+  {{else}}
+    <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/hostkey" class="inline">
+      <input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="action" value="fetch">
+      <button>{{if $n.HostKey}}Check the key again{{else}}Fetch the server's key{{end}}</button>
+    </form>
+  {{end}}
+</section>
+{{end}}
+
+{{if and $n.SSHUser $n.HostKey}}
+<section class="card">
+  <h2>Manage over SSH</h2>
+  <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/check" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button>Check status and logs</button></form>
+
+  {{with .Data.Status}}
+  <table>
+    <tr><th>Service</th><td>{{.Unit}}: {{.Active}} ({{.Sub}}) since {{.Since}}</td></tr>
+    <tr><th>Program</th><td><code class="wrap">{{.SHA256}}</code>{{if .HasBackup}} &middot; previous version kept{{end}}</td></tr>
+    <tr><th>Memory / files / threads</th><td>{{.RSSKB}} kB / {{.FDs}} / {{.Threads}}</td></tr>
+    <tr><th>Server</th><td>load {{.Load1}}, {{.MemAvail}} MB available</td></tr>
+    <tr><th>nodectl</th><td>version {{.Version}}</td></tr>
+  </table>
+  {{end}}
+  {{if .Data.Logs}}<pre>{{.Data.Logs}}</pre>{{end}}
+  {{if .Data.Result}}<p>{{.Data.Result}}</p>{{end}}
+
+  <h3>Service</h3>
+  {{range $verb := list "restart" "start" "stop"}}
+  <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/ctl" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="verb" value="{{$verb}}"><button{{if eq $verb "stop"}} class="danger"{{end}}>{{$verb}}</button></form>
+  {{end}}
+  <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/stop-for" class="inline">
+    <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+    <input name="minutes" value="1" size="3" aria-label="minutes">
+    <button title="stops the service, and the node starts it again by itself">Stop for (minutes), then start again</button>
+  </form>
+
+  <h3>Upgrade</h3>
+  <p class="muted">Downloads the release, checks it against the release's checksums, sends it, installs it, and requires the node to pass its checks. If it does not, the previous version is put back.</p>
+  <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/upgrade" class="inline">
+    <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+    <input name="tag" placeholder="v0.2.0" size="10" required>
+    <button>Upgrade this node</button>
+  </form>
+</section>
+{{end}}
+{{template "foot" .}}

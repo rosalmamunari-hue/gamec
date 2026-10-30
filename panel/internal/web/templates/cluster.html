@@ -28,6 +28,7 @@
           <input name="minutes" value="30" size="3" aria-label="minutes">
           <button title="take it out of the list for a while; it returns by itself">Pause (min)</button>
         </form>
+        <a class="btn" href="/cluster/{{$c.ID}}/node/{{.N.ID}}">Manage</a>
         <form method="post" action="/cluster/{{$c.ID}}/node/{{.N.ID}}/delete" class="inline">
           <input type="hidden" name="csrf" value="{{$p.CSRF}}">
           <button class="danger">Delete</button>
@@ -39,6 +40,11 @@
   </table>
   {{if $p.Admin}}
   <form method="post" action="/cluster/{{$c.ID}}/probe" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button>Probe now</button></form>
+  <form method="post" action="/cluster/{{$c.ID}}/upgrade-all" class="inline">
+    <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+    <input name="tag" placeholder="v0.2.0" size="9" required aria-label="release">
+    <button title="one node at a time; stops at the first problem">Upgrade all nodes (SSH)</button>
+  </form>
   <details>
     <summary>Add a node</summary>
     <form method="post" action="/cluster/{{$c.ID}}/node" class="stack">

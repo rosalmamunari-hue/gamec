@@ -136,11 +136,11 @@ func TestKeyEncodingRoundTrips(t *testing.T) {
 
 func TestJoinTxtStrings(t *testing.T) {
 	cases := map[string]string{
-		`"abc" "def"`:    "abcdef",
-		`"gs1:1/1:xyz"`:  "gs1:1/1:xyz",
-		`plain`:          "plain",
-		`"a\"b"`:         `a"b`,
-		`  "x"  "y"  `:   "xy",
+		`"abc" "def"`:   "abcdef",
+		`"gs1:1/1:xyz"`: "gs1:1/1:xyz",
+		`plain`:         "plain",
+		`"a\"b"`:        `a"b`,
+		`  "x"  "y"  `:  "xy",
 	}
 	for in, want := range cases {
 		if got := JoinTxtStrings(in); got != want {

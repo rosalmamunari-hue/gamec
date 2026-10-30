@@ -24,6 +24,8 @@ import (
 	"gamec/panel/internal/auth"
 	"gamec/panel/internal/dns"
 	"gamec/panel/internal/engine"
+	"gamec/panel/internal/ops"
+	"gamec/panel/internal/sshx"
 	"gamec/panel/internal/store"
 	"gamec/panel/internal/vault"
 	"gamec/panel/internal/web"
@@ -34,6 +36,7 @@ const usage = `panel <command> [flags]
   init            create the data directory and the encrypted vault
   adduser         add a user (prints the code to enrol in an authenticator app)
   serve           run the panel
+  ssh-keygen      create the panel's own SSH key (the public half goes on the nodes)
   import-cluster  bring an existing signing key and token secret in as a cluster
   set-secret      store a secret in the vault (value read from the terminal or stdin)
   get-secret      print a secret from the vault (for example a cluster's token secret)
@@ -49,7 +52,7 @@ func main() {
 		os.Exit(2)
 	}
 	cmds := map[string]func([]string) error{
-		"init": cmdInit, "adduser": cmdAddUser, "serve": cmdServe, "import-cluster": cmdImportCluster,
+		"init": cmdInit, "adduser": cmdAddUser, "serve": cmdServe, "import-cluster": cmdImportCluster, "ssh-keygen": cmdSSHKeygen,
 		"set-secret": cmdSetSecret, "get-secret": cmdGetSecret, "verify-audit": cmdVerifyAudit,
 	}
 	run, ok := cmds[os.Args[1]]
@@ -251,6 +254,41 @@ func cmdImportCluster(args []string) error {
 	return nil
 }
 
+func cmdSSHKeygen(args []string) error {
+	fs := flag.NewFlagSet("ssh-keygen", flag.ExitOnError)
+	data := dataFlag(fs)
+	force := fs.Bool("force", false, "replace the existing key (every node must then be given the new public key)")
+	fs.Parse(args)
+	p := pathsOf(*data)
+	v, err := openVault(p)
+	if err != nil {
+		return err
+	}
+	if old, ok, _ := v.Get(web.SSHKeyName); ok && !*force {
+		signer, err := sshx.ParseSigner(old)
+		if err != nil {
+			return err
+		}
+		fmt.Println("the panel already has an SSH key; its public key is:")
+		fmt.Println(sshx.PublicLine(signer, "gamec-panel"))
+		return nil
+	}
+	priv, pub, err := sshx.GenerateKey("gamec-panel")
+	if err != nil {
+		return err
+	}
+	if err := v.Set(web.SSHKeyName, priv); err != nil {
+		return err
+	}
+	if al, err := audit.Open(p.audit); err == nil {
+		al.Append(audit.Entry{User: "cli", Action: "ssh-keygen", OK: true})
+	}
+	fmt.Println("created. The private key is stored encrypted in the vault and is never shown.")
+	fmt.Println("public key (the panel's SSH page turns it into a script for each server):")
+	fmt.Println(pub)
+	return nil
+}
+
 func cmdSetSecret(args []string) error {
 	fs := flag.NewFlagSet("set-secret", flag.ExitOnError)
 	data := dataFlag(fs)
@@ -321,6 +359,7 @@ func cmdServe(args []string) error {
 	trustProxy := fs.Bool("trust-proxy", false, "take the client address from X-Forwarded-For (only behind your own proxy)")
 	probeEvery := fs.Duration("probe-interval", time.Minute, "how often every node is probed")
 	tick := fs.Duration("tick", 30*time.Second, "how often automatic publishing decides")
+	releaseBase := fs.String("release-base", "https://github.com/rosalmamunari-hue/gamec/releases/download", "where released programs are downloaded from")
 	autoUnseal := fs.Bool("unseal-at-start", false, "unseal with $PANEL_PASSPHRASE_FILE at start (otherwise unseal in the browser)")
 	fs.Parse(args)
 	p := pathsOf(*data)
@@ -366,6 +405,27 @@ func cmdServe(args []string) error {
 			return dns.New(t.Provider, t.CredRef, creds, dns.Options{})
 		}}
 	sched := engine.NewScheduler(pub, mon, st)
+	nodeOps := &ops.Ops{
+		Open: func(ctx context.Context, n store.Node) (ops.Runner, error) {
+			pemKey, ok, err := v.Get(web.SSHKeyName)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				return nil, errors.New("the panel has no SSH key yet; run `panel ssh-keygen`")
+			}
+			signer, err := sshx.ParseSigner(pemKey)
+			if err != nil {
+				return nil, err
+			}
+			c, err := sshx.Dial(sshx.Target{Addr: n.SSHAddr(), User: n.SSHUser, HostKey: n.HostKey, Signer: signer, Timeout: 10 * time.Second})
+			if err != nil {
+				return nil, err
+			}
+			return c, nil
+		},
+		Probe: func(ctx context.Context, n store.Node) engine.ProbeResult { return engine.RealProber{}.Probe(ctx, n) },
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -373,7 +433,8 @@ func cmdServe(args []string) error {
 	go sched.Run(ctx, *tick)
 
 	srv := &web.Server{Users: users, Sessions: auth.NewSessions(30*time.Minute, 12*time.Hour), Vault: v, Store: st,
-		Audit: al, AuditPath: p.audit, Mon: mon, Pub: pub, Sched: sched, Secure: *secure, TrustProxy: *trustProxy}
+		Audit: al, AuditPath: p.audit, Mon: mon, Pub: pub, Sched: sched, Secure: *secure, TrustProxy: *trustProxy,
+		Ops: nodeOps, ReleaseBase: *releaseBase}
 	hs := &http.Server{Addr: *listen, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout: 30 * time.Second, WriteTimeout: 10 * time.Minute, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 16 << 10}
 	go func() {
