@@ -7,6 +7,8 @@ import org.junit.Assert.fail
 import org.junit.Test
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
+import java.net.DatagramPacket
+import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -27,10 +29,11 @@ class DnsTest {
     }
 
     /** A response to a TXT question; each answer is a list of TXT strings (one record). Answers use a name pointer. */
-    private fun response(id: Int, name: String, answers: List<List<String>>, rcode: Int = 0, qr: Boolean = true): ByteArray {
+    private fun response(id: Int, name: String, answers: List<List<String>>, rcode: Int = 0, qr: Boolean = true,
+                         truncated: Boolean = false): ByteArray {
         val o = ByteArrayOutputStream()
         u16(o, id)
-        u16(o, (if (qr) 0x8180 else 0x0100) or rcode)
+        u16(o, (if (qr) 0x8180 else 0x0100) or rcode or (if (truncated) 0x0200 else 0))
         u16(o, 1); u16(o, answers.size); u16(o, 0); u16(o, 0)
         o.write(nameBytes(name)); u16(o, 16); u16(o, 1)
         for (strings in answers) {
@@ -244,7 +247,8 @@ class DnsTest {
     @Test
     fun resolversAreInterleavedDotFirst() {
         val cfg = DiscoveryConfig("n", "k", "device-1234567890abcdef",
-            dohProviders = listOf("https://doh1/x", "https://doh2/x"), dotServers = listOf("1.1.1.1", "9.9.9.9:8853"))
+            dohProviders = listOf("https://doh1/x", "https://doh2/x"), dotServers = listOf("1.1.1.1", "9.9.9.9:8853"),
+            do53Servers = emptyList())
         assertEquals(
             listOf("dot:1.1.1.1", "doh:https://doh1/x", "dot:9.9.9.9:8853", "doh:https://doh2/x"),
             Resolvers.build(cfg).map { it.first },
@@ -253,7 +257,96 @@ class DnsTest {
 
     @Test
     fun dotCanBeSwitchedOff() {
-        val cfg = DiscoveryConfig("n", "k", "device-1234567890abcdef", dohProviders = listOf("https://doh1/x"), dotServers = emptyList())
+        val cfg = DiscoveryConfig("n", "k", "device-1234567890abcdef", dohProviders = listOf("https://doh1/x"),
+            dotServers = emptyList(), do53Servers = emptyList())
         assertEquals(listOf("doh:https://doh1/x"), Resolvers.build(cfg).map { it.first })
+    }
+
+    @Test
+    fun resolversInterleaveDotDohAndDo53() {
+        val cfg = DiscoveryConfig("n", "k", "device-1234567890abcdef",
+            dohProviders = listOf("https://doh1/x"), dotServers = listOf("1.1.1.1"), do53Servers = listOf("9.9.9.9"))
+        assertEquals(
+            listOf("dot:1.1.1.1", "doh:https://doh1/x", "do53:9.9.9.9"),
+            Resolvers.build(cfg).map { it.first },
+        )
+    }
+
+    // ---- plain DNS (port 53): UDP, falling back to TCP when the UDP reply is truncated ----
+
+    private fun id(q: ByteArray) = ((q[0].toInt() and 0xFF) shl 8) or (q[1].toInt() and 0xFF)
+
+    @Test
+    fun do53RoundTripOverUdp() {
+        val sock = DatagramSocket(0, InetAddress.getByName("127.0.0.1"))
+        Thread {
+            val buf = ByteArray(4096)
+            while (!sock.isClosed) {
+                val pkt = DatagramPacket(buf, buf.size)
+                try { sock.receive(pkt) } catch (_: Exception) { break }
+                val r = response(id(buf.copyOf(pkt.length)), "_gs.example.com", listOf(listOf("1/1:payload")))
+                try { sock.send(DatagramPacket(r, r.size, pkt.address, pkt.port)) } catch (_: Exception) {}
+            }
+        }.also { it.isDaemon = true }.start()
+        try {
+            assertEquals(listOf("1/1:payload"), Do53.query("127.0.0.1", sock.localPort, "_gs.example.com", 2000))
+        } finally { sock.close() }
+    }
+
+    @Test
+    fun do53FallsBackToTcpWhenTheUdpAnswerIsTruncated() {
+        // a real DNS server answers UDP and TCP on the same port number; bind both sockets there
+        var port = 40000 + (Math.random() * 10000).toInt()
+        var udp: DatagramSocket? = null
+        for (attempt in 0 until 20) {
+            try {
+                udp = DatagramSocket(port, InetAddress.getByName("127.0.0.1"))
+                break
+            } catch (_: Exception) {
+                port++
+            }
+        }
+        val u = udp ?: throw IllegalStateException("could not bind a UDP port for the test")
+        val ss = ServerSocket(port, 5, InetAddress.getByName("127.0.0.1"))
+        Thread {
+            val buf = ByteArray(4096)
+            while (!u.isClosed) {
+                val pkt = DatagramPacket(buf, buf.size)
+                try { u.receive(pkt) } catch (_: Exception) { break }
+                val r = response(id(buf.copyOf(pkt.length)), "_gs.example.com", listOf(listOf("short")), truncated = true)
+                try { u.send(DatagramPacket(r, r.size, pkt.address, pkt.port)) } catch (_: Exception) {}
+            }
+        }.also { it.isDaemon = true }.start()
+        Thread {
+            while (!ss.isClosed) {
+                val c = try { ss.accept() } catch (_: Exception) { break }
+                Thread {
+                    try {
+                        val inp = DataInputStream(c.getInputStream())
+                        val q = ByteArray(inp.readUnsignedShort()); inp.readFully(q)
+                        val r = response(id(q), "_gs.example.com", listOf(listOf("1/1:full-answer-over-tcp")))
+                        c.getOutputStream().write(byteArrayOf((r.size shr 8).toByte(), r.size.toByte()))
+                        c.getOutputStream().write(r)
+                        c.close()
+                    } catch (_: Exception) {
+                    }
+                }.also { it.isDaemon = true }.start()
+            }
+        }.also { it.isDaemon = true }.start()
+        try {
+            assertEquals(listOf("1/1:full-answer-over-tcp"), Do53.query("127.0.0.1", port, "_gs.example.com", 2000))
+        } finally { u.close(); ss.close() }
+    }
+
+    @Test
+    fun do53ServerThatNeverRepliesIsAnError() {
+        val sock = DatagramSocket(0, InetAddress.getByName("127.0.0.1")) // nothing ever answers
+        try {
+            try {
+                Do53.query("127.0.0.1", sock.localPort, "_gs.example.com", 300)
+                fail("silence must be an error")
+            } catch (_: Exception) {
+            }
+        } finally { sock.close() }
     }
 }

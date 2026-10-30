@@ -120,8 +120,11 @@ let port = try shield.start()
 
 Settings worth knowing: `connectRetryWindow` (default 15 s), `deadAfterUnanswered` (default 20 s: a connection
 that was sent data and heard nothing back is closed so the game reconnects; set 0 if your protocol can go
-that long without replies), `dohProviders` / `dotServers` (IP addresses; add one that works where your
-players are, e.g. `223.5.5.5` in mainland China).
+that long without replies), `dohProviders` / `dotServers` / `do53Servers` (IP addresses; add one that works
+where your players are, e.g. `223.5.5.5` in mainland China). All three transports race at once; `do53Servers`
+is plain DNS on port 53 (UDP, falling back to TCP when the reply is truncated) — unencrypted, but the signed
+list cannot be forged, only dropped, so this is safe to use on networks that only allow port 53. Pass
+`do53Servers: []` (Swift) / `do53Servers = emptyList()` (Kotlin) to turn it off.
 
 **Reconnecting.** The SDK keeps a *new* connection coming; it cannot move a *live* one to another node,
 because the node-to-origin leg dies with the node. The game must reconnect when its socket closes.

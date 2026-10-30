@@ -1,6 +1,9 @@
 package com.gamec.shield
 
 import java.io.DataInputStream
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.security.SecureRandom
@@ -124,5 +127,46 @@ internal object Dot {
         s.sslParameters = p
         s.startHandshake()
         return s
+    }
+}
+
+/** Plain DNS (RFC 1035): UDP on port 53, falling back to TCP when the UDP reply is truncated (TC bit). */
+internal object Do53 {
+    private val random = SecureRandom()
+
+    fun query(host: String, port: Int = 53, name: String, timeoutMs: Int): List<String> {
+        val id = random.nextInt(0x10000)
+        val q = DnsWire.buildQuery(name, id)
+        val addr = InetAddress.getByName(host)
+        DatagramSocket().use { sock ->
+            sock.soTimeout = timeoutMs
+            sock.send(DatagramPacket(q, q.size, addr, port))
+            val buf = ByteArray(4096)
+            val pkt = DatagramPacket(buf, buf.size)
+            sock.receive(pkt)
+            if (!truncated(buf, pkt.length)) return DnsWire.parseTxt(buf.copyOf(pkt.length), id)
+        }
+        return queryTcp(host, port, q, id, timeoutMs) // UDP reply did not fit: redo it over TCP
+    }
+
+    private fun truncated(msg: ByteArray, len: Int): Boolean {
+        if (len < 4) return false
+        val flags = ((msg[2].toInt() and 0xFF) shl 8) or (msg[3].toInt() and 0xFF)
+        return flags and 0x0200 != 0
+    }
+
+    private fun queryTcp(host: String, port: Int, q: ByteArray, id: Int, timeoutMs: Int): List<String> {
+        Socket().use { s ->
+            s.connect(InetSocketAddress(host, port), timeoutMs)
+            s.soTimeout = timeoutMs
+            val out = s.getOutputStream()
+            out.write(byteArrayOf((q.size shr 8).toByte(), q.size.toByte()))
+            out.write(q)
+            out.flush()
+            val inp = DataInputStream(s.getInputStream())
+            val resp = ByteArray(inp.readUnsignedShort())
+            inp.readFully(resp)
+            return DnsWire.parseTxt(resp, id)
+        }
     }
 }

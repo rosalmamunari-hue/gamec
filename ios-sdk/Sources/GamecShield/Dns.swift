@@ -144,3 +144,79 @@ enum Dot {
         return try DnsWire.parseTxt(body, expectId: id)
     }
 }
+
+/// Plain DNS (RFC 1035): UDP on port 53, falling back to TCP when the UDP reply is truncated (TC bit).
+enum Do53 {
+    private static func truncated(_ msg: Data) -> Bool {
+        guard msg.count >= 4 else { return false }
+        let flags = Int(msg[2]) << 8 | Int(msg[3])
+        return flags & 0x0200 != 0
+    }
+
+    /// Blocking; call it off the main thread.
+    static func query(host: String, port: UInt16 = 53, name: String, timeout: TimeInterval) throws -> [String] {
+        let id = UInt16.random(in: 0...UInt16.max)
+        let q = try DnsWire.buildQuery(name: name, id: id)
+        let queue = DispatchQueue(label: "gamec.do53")
+
+        let conn = NWConnection(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!, using: .udp)
+        let ready = DispatchSemaphore(value: 0)
+        var ok = false
+        conn.stateUpdateHandler = { state in
+            if case .ready = state { if !ok { ok = true; ready.signal() } }
+            if case .failed = state { if !ok { ready.signal() } }
+        }
+        conn.start(queue: queue)
+        defer { conn.cancel() }
+        guard ready.wait(timeout: .now() + timeout) == .success, ok else {
+            throw DnsError.malformed("could not reach \(host):\(port)")
+        }
+
+        let sent = DispatchSemaphore(value: 0)
+        var sendError: NWError?
+        conn.send(content: q, completion: .contentProcessed { e in sendError = e; sent.signal() })
+        guard sent.wait(timeout: .now() + timeout) == .success, sendError == nil else {
+            throw DnsError.malformed("could not send the query")
+        }
+
+        let got = DispatchSemaphore(value: 0)
+        var reply: Data?
+        conn.receiveMessage { data, _, _, error in reply = (error == nil) ? data : nil; got.signal() }
+        guard got.wait(timeout: .now() + timeout) == .success, let msg = reply else {
+            throw DnsError.malformed("no reply from \(host):\(port)")
+        }
+        if !truncated(msg) { return try DnsWire.parseTxt(msg, expectId: id) }
+        return try queryTcp(host: host, port: port, query: q, id: id, timeout: timeout, queue: queue)
+    }
+
+    private static func queryTcp(host: String, port: UInt16, query: Data, id: UInt16, timeout: TimeInterval,
+                                 queue: DispatchQueue) throws -> [String] {
+        let tcp = NWProtocolTCP.Options()
+        tcp.connectionTimeout = Int(timeout.rounded(.up))
+        let conn = NWConnection(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!,
+                                using: NWParameters(tls: nil, tcp: tcp))
+        let ready = DispatchSemaphore(value: 0)
+        var ok = false
+        conn.stateUpdateHandler = { state in
+            if case .ready = state { if !ok { ok = true; ready.signal() } }
+            if case .failed = state { if !ok { ready.signal() } }
+        }
+        conn.start(queue: queue)
+        defer { conn.cancel() }
+        guard ready.wait(timeout: .now() + timeout) == .success, ok else {
+            throw DnsError.malformed("could not reach \(host):\(port) over TCP")
+        }
+        let frame = Data([UInt8(query.count >> 8), UInt8(query.count & 0xFF)]) + query
+        let sent = DispatchSemaphore(value: 0)
+        var sendError: NWError?
+        conn.send(content: frame, completion: .contentProcessed { e in sendError = e; sent.signal() })
+        guard sent.wait(timeout: .now() + timeout) == .success, sendError == nil else {
+            throw DnsError.malformed("could not send the query over TCP")
+        }
+        let header = try TokenClient.receiveExactly(conn, 2, timeout)
+        let len = Int(header[0]) << 8 | Int(header[1])
+        guard len >= 12 else { throw DnsError.malformed("bad response length \(len)") }
+        let body = try TokenClient.receiveExactly(conn, len, timeout)
+        return try DnsWire.parseTxt(body, expectId: id)
+    }
+}

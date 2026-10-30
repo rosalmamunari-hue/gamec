@@ -72,6 +72,10 @@ public struct DiscoveryConfig {
     public let dohProviders: [String]
     /// DNS-over-TLS servers (port 853, or "host:port"), by IP address. Empty = DoH only.
     public let dotServers: [String]
+    /// Plain DNS servers on port 53 (or "host:port"), by IP address. Unencrypted, but the signed list cannot
+    /// be forged, only dropped, and plain port 53 gets through some networks that block DoH/DoT. Empty =
+    /// DoH/DoT only.
+    public let do53Servers: [String]
     /// All resolvers are tried at once, started this far apart (DoT first, then DoH, interleaved); the first
     /// answer whose signature verifies wins. A resolver cannot win with a forged list.
     public let resolverStagger: TimeInterval
@@ -93,6 +97,7 @@ public struct DiscoveryConfig {
                 fallbackNames: [String] = [],
                 dohProviders: [String] = DnsDefaults.doh,
                 dotServers: [String] = DnsDefaults.dot,
+                do53Servers: [String] = DnsDefaults.do53,
                 resolverStagger: TimeInterval = 0.2,
                 timeout: TimeInterval = 5, refreshInterval: TimeInterval = 600,
                 retryInterval: TimeInterval = 30, tokenMargin: TimeInterval = 60,
@@ -107,6 +112,7 @@ public struct DiscoveryConfig {
         self.fallbackNames = fallbackNames
         self.dohProviders = dohProviders
         self.dotServers = dotServers
+        self.do53Servers = do53Servers
         self.resolverStagger = resolverStagger
         self.timeout = timeout
         self.refreshInterval = refreshInterval

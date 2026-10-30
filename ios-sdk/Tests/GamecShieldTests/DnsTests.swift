@@ -17,10 +17,11 @@ final class DnsTests: XCTestCase {
     }
 
     /// A response to a TXT question; each answer is a list of TXT strings (one record). Answers use a name pointer.
-    private func response(id: Int, name: String, answers: [[String]], rcode: Int = 0, qr: Bool = true) -> Data {
+    private func response(id: Int, name: String, answers: [[String]], rcode: Int = 0, qr: Bool = true,
+                          truncated: Bool = false) -> Data {
         var d = Data()
         u16(&d, id)
-        u16(&d, (qr ? 0x8180 : 0x0100) | rcode)
+        u16(&d, (qr ? 0x8180 : 0x0100) | rcode | (truncated ? 0x0200 : 0))
         u16(&d, 1); u16(&d, answers.count); u16(&d, 0); u16(&d, 0)
         d.append(nameBytes(name)); u16(&d, 16); u16(&d, 1)
         for strings in answers {
@@ -201,14 +202,14 @@ final class DnsTests: XCTestCase {
     func testResolversAreInterleavedDotFirst() throws {
         let cfg = try DiscoveryConfig(name: "n", publicKey: "k", deviceId: "device-1234567890abcdef",
                                       dohProviders: ["https://doh1/x", "https://doh2/x"],
-                                      dotServers: ["1.1.1.1", "9.9.9.9:8853"])
+                                      dotServers: ["1.1.1.1", "9.9.9.9:8853"], do53Servers: [])
         XCTAssertEqual(Resolvers.build(cfg).map { $0.label },
                        ["dot:1.1.1.1", "doh:https://doh1/x", "dot:9.9.9.9:8853", "doh:https://doh2/x"])
     }
 
     func testDotCanBeSwitchedOff() throws {
         let cfg = try DiscoveryConfig(name: "n", publicKey: "k", deviceId: "device-1234567890abcdef",
-                                      dohProviders: ["https://doh1/x"], dotServers: [])
+                                      dohProviders: ["https://doh1/x"], dotServers: [], do53Servers: [])
         XCTAssertEqual(Resolvers.build(cfg).map { $0.label }, ["doh:https://doh1/x"])
     }
 
@@ -217,13 +218,127 @@ final class DnsTests: XCTestCase {
                                                  dohProviders: [], dotServers: []))
     }
 
+    func testResolversInterleaveDotDohAndDo53() throws {
+        let cfg = try DiscoveryConfig(name: "n", publicKey: "k", deviceId: "device-1234567890abcdef",
+                                      dohProviders: ["https://doh1/x"], dotServers: ["1.1.1.1"], do53Servers: ["9.9.9.9"])
+        XCTAssertEqual(Resolvers.build(cfg).map { $0.label }, ["dot:1.1.1.1", "doh:https://doh1/x", "do53:9.9.9.9"])
+    }
+
+    // MARK: plain DNS (port 53): UDP, falling back to TCP when the UDP reply is truncated
+
+    private final class DnsUdpServer {
+        let listener: NWListener
+        private let q = DispatchQueue(label: "test.dns.udp")
+        private var conns: [NWConnection] = []
+        var port: UInt16 = 0
+
+        /// `onPort`, when given, tries to bind exactly that port (used to put the UDP and TCP test servers on
+        /// the same port number, as a real DNS server does); throws if that port is taken.
+        init(onPort: UInt16? = nil, respond: @escaping (Data) -> Data?) throws {
+            if let p = onPort, let nwPort = NWEndpoint.Port(rawValue: p) {
+                listener = try NWListener(using: .udp, on: nwPort)
+            } else {
+                listener = try NWListener(using: .udp)
+            }
+            let ready = DispatchSemaphore(value: 0)
+            listener.stateUpdateHandler = { if case .ready = $0 { ready.signal() } }
+            listener.newConnectionHandler = { [weak self] c in
+                guard let self = self else { return }
+                self.conns.append(c)
+                c.start(queue: self.q)
+                self.receiveLoop(c, respond: respond)
+            }
+            listener.start(queue: q)
+            _ = ready.wait(timeout: .now() + 3)
+            port = listener.port!.rawValue
+        }
+
+        private func receiveLoop(_ c: NWConnection, respond: @escaping (Data) -> Data?) {
+            c.receiveMessage { [weak self] data, _, _, _ in
+                guard let self = self else { return }
+                if let data = data, let r = respond(data) {
+                    c.send(content: r, completion: .contentProcessed { _ in self.receiveLoop(c, respond: respond) })
+                } else {
+                    self.receiveLoop(c, respond: respond)
+                }
+            }
+        }
+
+        func stop() { listener.cancel(); conns.forEach { $0.cancel() } }
+    }
+
+    private final class DnsTcpServerOnPort {
+        let listener: NWListener
+        private let q = DispatchQueue(label: "test.dns.tcp.fixed")
+        private var conns: [NWConnection] = []
+
+        init(port: UInt16, respond: @escaping (Data) -> Data?) throws {
+            listener = try NWListener(using: .tcp, on: NWEndpoint.Port(rawValue: port)!)
+            let ready = DispatchSemaphore(value: 0)
+            listener.stateUpdateHandler = { if case .ready = $0 { ready.signal() } }
+            listener.newConnectionHandler = { [weak self] c in
+                guard let self = self else { return }
+                self.conns.append(c)
+                c.start(queue: self.q)
+                c.receive(minimumIncompleteLength: 2, maximumLength: 4096) { data, _, _, _ in
+                    guard let data = data, data.count >= 2 else { return c.cancel() }
+                    let query = data.dropFirst(2)
+                    if let r = respond(Data(query)) {
+                        let framed = Data([UInt8(r.count >> 8), UInt8(r.count & 0xFF)]) + r
+                        c.send(content: framed, completion: .contentProcessed { _ in c.cancel() })
+                    } else {
+                        c.cancel()
+                    }
+                }
+            }
+            listener.start(queue: q)
+            _ = ready.wait(timeout: .now() + 3)
+        }
+
+        func stop() { listener.cancel(); conns.forEach { $0.cancel() } }
+    }
+
+    func testDo53RoundTripOverUdp() throws {
+        let s = try DnsUdpServer { q in self.response(id: self.queryID(q), name: "_gs.example.com", answers: [["1/1:payload"]]) }
+        defer { s.stop() }
+        XCTAssertEqual(try Do53.query(host: "127.0.0.1", port: s.port, name: "_gs.example.com", timeout: 2), ["1/1:payload"])
+    }
+
+    func testDo53FallsBackToTcpWhenTheUdpAnswerIsTruncated() throws {
+        // a real DNS server answers UDP and TCP on the same port number; bind both listeners to it.
+        var port: UInt16 = UInt16(20000 + Int.random(in: 0..<20000))
+        var udp: DnsUdpServer?
+        for _ in 0..<20 {
+            if let s = try? DnsUdpServer(onPort: port, respond: { q in
+                self.response(id: self.queryID(q), name: "_gs.example.com", answers: [["short"]], truncated: true)
+            }) {
+                udp = s
+                break
+            }
+            port += 1
+        }
+        guard let udpServer = udp else { return XCTFail("could not bind a UDP port for the test") }
+        let tcp = try DnsTcpServerOnPort(port: port) { q in
+            self.response(id: self.queryID(q), name: "_gs.example.com", answers: [["1/1:full-answer-over-tcp"]])
+        }
+        defer { udpServer.stop(); tcp.stop() }
+        XCTAssertEqual(try Do53.query(host: "127.0.0.1", port: port, name: "_gs.example.com", timeout: 2),
+                       ["1/1:full-answer-over-tcp"])
+    }
+
+    func testDo53ServerThatNeverRepliesIsAnError() throws {
+        let s = try DnsUdpServer { _ in nil } // never responds
+        defer { s.stop() }
+        XCTAssertThrowsError(try Do53.query(host: "127.0.0.1", port: s.port, name: "_gs.example.com", timeout: 0.3))
+    }
+
     // MARK: opt-in live test against the real public resolvers (set GAMEC_TEST_LIVE_NAME)
 
     func testLiveDotAndDohAgainstRealResolvers() throws {
         let name = ProcessInfo.processInfo.environment["GAMEC_TEST_LIVE_NAME"] ?? ""
         try XCTSkipIf(name.isEmpty, "GAMEC_TEST_LIVE_NAME not set")
 
-        var dotOK = 0, dohOK = 0
+        var dotOK = 0, dohOK = 0, do53OK = 0
         var report: [String] = []
         for server in DnsDefaults.dot {
             do {
@@ -239,8 +354,18 @@ final class DnsTests: XCTestCase {
             report.append("doh \(url): \(recs.count) record(s)")
             if !recs.isEmpty { dohOK += 1 }
         }
+        for server in DnsDefaults.do53 {
+            do {
+                let recs = try Do53.query(host: server, name: name, timeout: 6)
+                report.append("do53 \(server): \(recs.count) record(s)")
+                if !recs.isEmpty { do53OK += 1 }
+            } catch {
+                report.append("do53 \(server) FAILED: \(error)")
+            }
+        }
         print("LIVE DNS:\n" + report.joined(separator: "\n"))
         XCTAssertGreaterThan(dotOK, 0, "no DoT server worked with the system TLS stack:\n" + report.joined(separator: "\n"))
         XCTAssertGreaterThan(dohOK, 0, "no DoH endpoint worked by IP address:\n" + report.joined(separator: "\n"))
+        XCTAssertGreaterThan(do53OK, 0, "no plain DNS (port 53) server worked:\n" + report.joined(separator: "\n"))
     }
 }

@@ -133,9 +133,15 @@ ShieldConfig(discovery = discovery, deadAfterUnansweredMs = 0)   // 0 = 关闭
 | `connectTimeoutMs` | 3000 | 连单个节点的超时 |
 | `localPort` | 0 | 本机端口，0 = 系统分配。需要固定端口时才设置 |
 
-`DiscoveryConfig` 里还有 `dohProviders` / `dotServers`（查 DNS 用的公共服务器，都用 IP 地址）。默认带了 Google、
-Cloudflare、阿里。**如果玩家主要在国内，国外的两家可能连不上，阿里 `223.5.5.5` 是国内可用的那个**；
+`DiscoveryConfig` 里还有 `dohProviders` / `dotServers` / `do53Servers`（查 DNS 用的公共服务器，都用 IP 地址）。
+默认带了 Google、Cloudflare、阿里。**如果玩家主要在国内，国外的两家可能连不上，阿里 `223.5.5.5` 是国内可用的那个**；
 需要的话可以只保留阿里的，或再加别的国内 DoH/DoT。
+
+三种一起用，谁先答应就用谁：
+- `dotServers`：DNS over TLS，853 端口，加密。
+- `dohProviders`：DNS over HTTPS，走 443，加密，和普通 HTTPS 流量混在一起不容易被单独挡住。
+- `do53Servers`（新增）：最普通的明文 DNS，53 端口，先 UDP、答复太长再自动走 TCP。**名单本身是签过名的，查询被人看到也伪造不了，只能丢包，所以用明文不会带来安全问题**；加它只是因为有些网络环境只放行 53 端口。
+不想用明文 53 的话，传 `do53Servers = emptyList()` 关掉即可。
 
 ## 手机退到后台、被系统杀掉
 

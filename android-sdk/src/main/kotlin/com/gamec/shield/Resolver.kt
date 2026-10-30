@@ -16,12 +16,19 @@ internal class DotResolver(private val host: String, private val port: Int = 853
     override fun query(name: String, timeoutMs: Int) = Dot.query(host, port, name, timeoutMs)
 }
 
+internal class Do53Resolver(private val host: String, private val port: Int = 53) : TxtResolver {
+    override fun query(name: String, timeoutMs: Int) = Do53.query(host, port, name = name, timeoutMs = timeoutMs)
+}
+
 internal object DnsDefaults {
     /** JSON DoH endpoints reached by IP address, so no prior (possibly poisoned) DNS lookup is needed. */
     val doh = listOf("https://1.1.1.1/dns-query", "https://8.8.8.8/resolve", "https://223.5.5.5/resolve")
 
     /** DNS-over-TLS servers on port 853, by IP address. */
     val dot = listOf("8.8.8.8", "1.1.1.1", "223.5.5.5")
+
+    /** Plain DNS servers on port 53, by IP address. */
+    val do53 = listOf("8.8.8.8", "1.1.1.1", "223.5.5.5")
 }
 
 internal object Race {
@@ -67,17 +74,24 @@ internal object Resolvers {
     /** Name of the resolver that answered last, for diagnostics. */
     @Volatile var lastWinner: String = ""
 
-    /** DoT and DoH servers interleaved (dot1, doh1, dot2, doh2, ...) so both transports start early. */
+    /** DoT, DoH and plain DNS (port 53) interleaved so all three transports start early. */
     fun build(cfg: DiscoveryConfig): List<Pair<String, TxtResolver>> {
+        fun hostPort(s: String, defaultPort: Int) =
+            if (':' in s) s.substringBefore(':') to s.substringAfter(':').toInt() else s to defaultPort
         val dot = cfg.dotServers.map { s ->
-            val (h, p) = if (':' in s) s.substringBefore(':') to s.substringAfter(':').toInt() else s to 853
+            val (h, p) = hostPort(s, 853)
             "dot:$s" to DotResolver(h, p) as TxtResolver
         }
         val doh = cfg.dohProviders.map { "doh:$it" to DohResolver(it) as TxtResolver }
+        val do53 = cfg.do53Servers.map { s ->
+            val (h, p) = hostPort(s, 53)
+            "do53:$s" to Do53Resolver(h, p) as TxtResolver
+        }
         val out = ArrayList<Pair<String, TxtResolver>>()
-        for (i in 0 until maxOf(dot.size, doh.size)) {
+        for (i in 0 until maxOf(dot.size, doh.size, do53.size)) {
             dot.getOrNull(i)?.let { out += it }
             doh.getOrNull(i)?.let { out += it }
+            do53.getOrNull(i)?.let { out += it }
         }
         return out
     }

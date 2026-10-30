@@ -59,6 +59,12 @@ class DiscoveryConfig(
     /** DNS-over-TLS servers (port 853, or "host:port"), by IP address. Empty = DoH only. */
     val dotServers: List<String> = DnsDefaults.dot,
     /**
+     * Plain DNS servers on port 53 (or "host:port"), by IP address. Unencrypted, but the signed list cannot
+     * be forged, only dropped, and plain port 53 gets through some networks that block DoH/DoT. Empty =
+     * DoH/DoT only.
+     */
+    val do53Servers: List<String> = DnsDefaults.do53,
+    /**
      * All resolvers are tried at once, started this far apart (DoT first, then DoH, interleaved); the first
      * answer whose signature verifies wins. A resolver cannot win with a forged list.
      */

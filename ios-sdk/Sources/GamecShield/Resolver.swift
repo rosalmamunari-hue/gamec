@@ -6,6 +6,8 @@ public enum DnsDefaults {
     public static let doh = ["https://1.1.1.1/dns-query", "https://8.8.8.8/resolve", "https://223.5.5.5/resolve"]
     /// DNS-over-TLS servers on port 853 ("host" or "host:port"), by IP address.
     public static let dot = ["8.8.8.8", "1.1.1.1", "223.5.5.5"]
+    /// Plain DNS servers on port 53 ("host" or "host:port"), by IP address.
+    public static let do53 = ["8.8.8.8", "1.1.1.1", "223.5.5.5"]
 }
 
 /// One way of asking DNS for TXT records. Blocking.
@@ -59,21 +61,29 @@ enum Resolvers {
         set { lock.lock(); _lastWinner = newValue; lock.unlock() }
     }
 
-    /// DoT and DoH servers interleaved (dot1, doh1, dot2, doh2, ...) so both transports start early.
+    private static func hostPort(_ s: String, defaultPort: UInt16) -> (String, UInt16) {
+        let parts = s.split(separator: ":", maxSplits: 1)
+        return (String(parts[0]), parts.count > 1 ? (UInt16(parts[1]) ?? defaultPort) : defaultPort)
+    }
+
+    /// DoT, DoH and plain DNS (port 53) interleaved so all three transports start early.
     static func build(_ cfg: DiscoveryConfig) -> [NamedResolver] {
         let dot: [NamedResolver] = cfg.dotServers.map { s in
-            let parts = s.split(separator: ":", maxSplits: 1)
-            let host = String(parts[0])
-            let port = parts.count > 1 ? UInt16(parts[1]) ?? 853 : 853
+            let (host, port) = hostPort(s, defaultPort: 853)
             return ("dot:\(s)", { name, timeout in (try? Dot.query(host: host, port: port, name: name, timeout: timeout)) ?? [] })
         }
         let doh: [NamedResolver] = cfg.dohProviders.map { url in
             ("doh:\(url)", { name, timeout in Doh.queryTxt(name: name, providers: [url], timeout: timeout) })
         }
+        let do53: [NamedResolver] = cfg.do53Servers.map { s in
+            let (host, port) = hostPort(s, defaultPort: 53)
+            return ("do53:\(s)", { name, timeout in (try? Do53.query(host: host, port: port, name: name, timeout: timeout)) ?? [] })
+        }
         var out: [NamedResolver] = []
-        for i in 0..<max(dot.count, doh.count) {
+        for i in 0..<max(dot.count, doh.count, do53.count) {
             if i < dot.count { out.append(dot[i]) }
             if i < doh.count { out.append(doh[i]) }
+            if i < do53.count { out.append(do53[i]) }
         }
         return out
     }
