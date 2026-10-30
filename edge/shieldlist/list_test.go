@@ -253,3 +253,27 @@ func TestAppConfigSealsAndOpens(t *testing.T) {
 		t.Fatal("sealed with an empty passphrase")
 	}
 }
+
+// During an update the old and the new record sets can be published side by side for a moment. The checks
+// that say "players can read this" must judge such a mix the way the apps do.
+func TestMixedRecordSetsAreJudgedLikeTheApps(t *testing.T) {
+	k := key(t)
+	now := time.Now()
+	short, _ := BuildRecords(k, manyNodes(1), now.Add(-time.Minute), time.Hour) // one bare record
+	long, _ := BuildRecords(k, manyNodes(60), now, time.Hour)                 // numbered records
+	if len(short) != 1 || len(long) < 2 {
+		t.Fatalf("setup: %d %d", len(short), len(long))
+	}
+	p, err := VerifyRecords(append(append([]string{}, long...), short...), &k.PublicKey, now)
+	if err != nil || len(p.Nodes) != 60 {
+		t.Fatalf("a bare record next to a numbered set: the newest complete one must win, got %v %v", p, err)
+	}
+
+	older, _ := BuildRecords(k, manyNodes(60), now.Add(-time.Minute), time.Hour)
+	if len(older) != len(long) {
+		t.Skip("the two lists split into different numbers of records")
+	}
+	if _, err := VerifyRecords(append(append([]string{}, older...), long...), &k.PublicKey, now); err == nil {
+		t.Fatal("two lists of the same shape at once: the apps refuse this, so must the check")
+	}
+}

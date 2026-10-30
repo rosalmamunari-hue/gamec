@@ -186,16 +186,31 @@ func VerifyRecords(records []string, pub *ecdsa.PublicKey, now time.Time) (*Payl
 }
 
 // VerifyRecordsSealed is VerifyRecords for lists that may be sealed with sealKey (nil = not sealed).
+//
+// It assembles records exactly as the apps do (android-sdk Directory.kt, ios-sdk Directory.swift), so the
+// panel's and signlist's "visible from outside" checks mean what a player would see: records are grouped by
+// the total they claim, a group in which some position appears twice (two lists of the same shape mixed,
+// as during an update) is ambiguous and skipped, and of the complete groups that verify the newest wins.
 func VerifyRecordsSealed(records []string, pub *ecdsa.PublicKey, now time.Time, sealKey []byte) (*Payload, error) {
-	parts := map[int]string{}
-	total := 0
+	groups := map[int]map[int]string{} // total -> position -> chunk
+	dup := map[int]bool{}
+	put := func(n, i int, chunk string) {
+		g := groups[n]
+		if g == nil {
+			g = map[int]string{}
+			groups[n] = g
+		}
+		if _, seen := g[i]; seen {
+			dup[n] = true
+		}
+		g[i] = chunk
+	}
 	for _, r := range records {
 		if !IsRecord(r) {
 			continue
 		}
 		if bareRe.MatchString(r) { // the whole list in one record
-			total = 1
-			parts[1] = r
+			put(1, 1, r)
 			continue
 		}
 		f := strings.SplitN(r, ":", 2)
@@ -211,22 +226,45 @@ func VerifyRecordsSealed(records []string, pub *ecdsa.PublicKey, now time.Time, 
 		if err1 != nil || err2 != nil || i < 1 || i > n {
 			continue
 		}
-		total = n
-		parts[i] = f[1]
+		put(n, i, f[1])
 	}
-	if total == 0 || len(parts) != total {
-		return nil, errors.New("incomplete record set")
+	totals := make([]int, 0, len(groups))
+	for n := range groups {
+		totals = append(totals, n)
 	}
-	idx := make([]int, 0, total)
-	for i := range parts {
-		idx = append(idx, i)
+	sort.Ints(totals) // a fixed order, so the error reported is stable
+	var best *Payload
+	lastErr := errors.New("incomplete record set")
+	for _, n := range totals {
+		parts := groups[n]
+		if dup[n] {
+			lastErr = errors.New("two different lists of the same shape are published at once")
+			continue
+		}
+		if len(parts) != n {
+			continue
+		}
+		var sb strings.Builder
+		for i := 1; i <= n; i++ {
+			sb.WriteString(parts[i])
+		}
+		p, err := verifyBody(sb.String(), pub, now, sealKey)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if best == nil || p.Iat > best.Iat {
+			best = p
+		}
 	}
-	sort.Ints(idx)
-	var sb strings.Builder
-	for _, i := range idx {
-		sb.WriteString(parts[i])
+	if best == nil {
+		return nil, lastErr
 	}
-	f := strings.SplitN(sb.String(), ".", 2)
+	return best, nil
+}
+
+func verifyBody(body string, pub *ecdsa.PublicKey, now time.Time, sealKey []byte) (*Payload, error) {
+	f := strings.SplitN(body, ".", 2)
 	if len(f) != 2 {
 		return nil, errors.New("malformed list")
 	}
