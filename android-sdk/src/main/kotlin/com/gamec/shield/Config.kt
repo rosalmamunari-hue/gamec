@@ -65,6 +65,11 @@ class DiscoveryConfig(
     val retrySec: Long = 30,
     /** Ask for a new token when the current one expires within this many seconds. */
     val tokenMarginSec: Long = 60,
+    /**
+     * When no node can be reached the list is re-read at once instead of waiting for [refreshSec], but not
+     * more often than this many seconds.
+     */
+    val urgentRefreshSec: Long = 3,
     /** Keeps the last good list across restarts, e.g. `PrefsListStore(context)`. */
     val store: ListStore? = null,
 ) {
@@ -110,7 +115,7 @@ class ShieldConfig(
     val discovery: DiscoveryConfig? = null,
     /** Local port the game connects to instead of the real server. 0 = pick a free port. */
     val localPort: Int = 0,
-    val connectTimeoutMs: Int = 3000,
+    val connectTimeoutMs: Int = 1000,
     val failCooldownMs: Long = 30_000,
     val reprobeIntervalMs: Long = 60_000,
     /**

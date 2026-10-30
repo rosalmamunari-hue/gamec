@@ -79,6 +79,9 @@ public struct DiscoveryConfig {
     public let retryInterval: TimeInterval
     /// Ask for a new token when the current one expires within this many seconds.
     public let tokenMargin: TimeInterval
+    /// When no node can be reached the list is re-read at once instead of waiting for `refreshInterval`,
+    /// but not more often than this.
+    public let urgentRefresh: TimeInterval
     /// Keeps the last good list across restarts, e.g. `UserDefaultsListStore()`.
     public let store: ListStore?
 
@@ -89,6 +92,7 @@ public struct DiscoveryConfig {
                 resolverStagger: TimeInterval = 0.2,
                 timeout: TimeInterval = 5, refreshInterval: TimeInterval = 600,
                 retryInterval: TimeInterval = 30, tokenMargin: TimeInterval = 60,
+                urgentRefresh: TimeInterval = 3,
                 store: ListStore? = nil) throws {
         guard isValidDeviceId(deviceId) else { throw ShieldError.invalidDeviceId }
         guard !(dohProviders.isEmpty && dotServers.isEmpty) else { throw ShieldError.emptyNodeList }
@@ -103,6 +107,7 @@ public struct DiscoveryConfig {
         self.refreshInterval = refreshInterval
         self.retryInterval = retryInterval
         self.tokenMargin = tokenMargin
+        self.urgentRefresh = urgentRefresh
         self.store = store
     }
 }
@@ -159,7 +164,7 @@ public struct ShieldConfig {
                 control: ControlConfig? = nil,
                 discovery: DiscoveryConfig? = nil,
                 localPort: UInt16 = 0,
-                connectTimeout: TimeInterval = 3,
+                connectTimeout: TimeInterval = 1,
                 failCooldown: TimeInterval = 30,
                 reprobeInterval: TimeInterval = 60,
                 connectRetryWindow: TimeInterval = 15,

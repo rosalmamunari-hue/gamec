@@ -135,7 +135,7 @@ class ShieldClient internal constructor(
 
     /** One round: current nodes, a token, then each node in order. */
     private fun tryOnce(): Socket? {
-        val nodes = source.nodes() ?: return null
+        val nodes = source.nodes() ?: run { source.refreshNow(); source.nodes() } ?: return null
         selector.update(nodes)
         val token = (source.token(selector.ordered()) ?: return null).toByteArray()
         for (node in selector.ordered()) {
@@ -147,6 +147,7 @@ class ShieldClient internal constructor(
                 selector.recordFailure(node)
             }
         }
+        source.refreshNow() // every node failed: the next round may already have a newer list
         return null
     }
 

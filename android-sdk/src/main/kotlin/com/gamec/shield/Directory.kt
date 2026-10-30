@@ -106,6 +106,7 @@ internal class NodeDirectory(
 ) {
     private var current: NodeList? = null
     private var nextTryAt = 0L
+    private var lastTryAt = Long.MIN_VALUE / 2
 
     init {
         try {
@@ -119,9 +120,23 @@ internal class NodeDirectory(
     @Synchronized
     fun get(): NodeList? {
         val now = clock()
+        if (now < nextTryAt) return usable(now)
+        return fetch(now)
+    }
+
+    /** Re-read now because nothing worked; at most once per [DiscoveryConfig.urgentRefreshSec]. */
+    @Synchronized
+    fun refreshNow(): NodeList? {
+        val now = clock()
+        if (now - lastTryAt < cfg.urgentRefreshSec) return usable(now)
+        return fetch(now)
+    }
+
+    private fun usable(now: Long): NodeList? = current?.takeIf { now <= it.exp }
+
+    private fun fetch(now: Long): NodeList? {
+        lastTryAt = now
         val c = current
-        val usable = if (c != null && now <= c.exp) c else null
-        if (now < nextTryAt) return usable
         try {
             var fresh: NodeList? = null
             for (n in listOf(cfg.name) + cfg.fallbackNames) {
@@ -141,7 +156,7 @@ internal class NodeDirectory(
             return fresh
         } catch (_: Exception) {
             nextTryAt = now + cfg.retrySec
-            return usable
+            return usable(now)
         }
     }
 }

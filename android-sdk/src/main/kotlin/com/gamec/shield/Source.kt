@@ -5,6 +5,9 @@ internal interface Source {
     /** The nodes to use right now, or null if none are known. May refresh them (blocking). */
     fun nodes(): List<Node>?
 
+    /** Every known node just failed: look for a newer list now, if this source can (rate limited). */
+    fun refreshNow() {}
+
     /** A token valid right now; [ordered] are the nodes to ask, best first, if the source must request one. */
     fun token(ordered: List<Node>): String?
 }
@@ -30,6 +33,7 @@ internal class DiscoverySource(
     )
 
     override fun nodes() = directory.get()?.nodes
+    override fun refreshNow() { directory.refreshNow() }
     override fun token(ordered: List<Node>) = tokens.get(ordered)
 }
 

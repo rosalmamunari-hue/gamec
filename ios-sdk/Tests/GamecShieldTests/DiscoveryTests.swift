@@ -175,6 +175,40 @@ final class DiscoveryTests: XCTestCase {
         XCTAssertNil(NodeDirectory(cfg: c, queryTxt: { _ in [] }, clock: { 1000 }).get())
     }
 
+    func testRefreshNowReadsAtOnceButNotMoreOftenThanEveryThreeSeconds() throws {
+        let k = P256.Signing.PrivateKey()
+        var now: Int64 = 1000
+        var queries = 0
+        var iat: Int64 = 900
+        let d = NodeDirectory(cfg: try cfg(k, refresh: 600), queryTxt: { _ in
+            queries += 1
+            return (try? self.records(k, self.nodes(2), iat: iat, exp: 99_999)) ?? []
+        }, clock: { now })
+        _ = d.get()
+        XCTAssertEqual(queries, 1)
+        now = 1001; iat = 950
+        _ = d.refreshNow()
+        XCTAssertEqual(queries, 1)
+        now = 1003
+        XCTAssertEqual(d.refreshNow()?.iat, 950)
+        XCTAssertEqual(queries, 2)
+        now = 1004
+        _ = d.refreshNow()
+        XCTAssertEqual(queries, 2)
+    }
+
+    func testRefreshNowKeepsTheOldListWhenTheReadFails() throws {
+        let k = P256.Signing.PrivateKey()
+        var now: Int64 = 1000
+        var down = false
+        let good = try records(k, nodes(2), iat: 900, exp: 99_999)
+        let d = NodeDirectory(cfg: try cfg(k), queryTxt: { _ in down ? [] : good }, clock: { now })
+        _ = d.get()
+        down = true
+        now = 1010
+        XCTAssertEqual(d.refreshNow()?.nodes.count, 2)
+    }
+
     func testDirectoryNeverGoesBackToAnOlderList() throws {
         let k = P256.Signing.PrivateKey()
         var now: Int64 = 1000

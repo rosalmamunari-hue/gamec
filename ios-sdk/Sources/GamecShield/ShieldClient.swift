@@ -172,6 +172,7 @@ public final class ShieldClient {
 
     /// One round: current nodes, a token, then each node in order. Blocking.
     private func tryOnce() -> NWConnection? {
+        if source.nodes() == nil { source.refreshNow() }
         guard let nodes = source.nodes() else { return nil }
         selector.update(nodes)
         guard let tokenString = source.token(ordered: selector.ordered()) else { return nil }
@@ -190,6 +191,7 @@ public final class ShieldClient {
             }
             selector.recordFailure(node)
         }
+        source.refreshNow() // every node failed: the next round may already have a newer list
         return nil
     }
 

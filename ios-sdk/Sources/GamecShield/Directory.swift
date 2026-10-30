@@ -105,6 +105,7 @@ final class NodeDirectory {
     private let lock = NSLock()
     private var current: NodeList?
     private var nextTryAt: Int64 = 0
+    private var lastTryAt: Int64?
 
     init(cfg: DiscoveryConfig,
          queryTxt: ((String) -> [String])? = nil,
@@ -120,24 +121,39 @@ final class NodeDirectory {
     func get() -> NodeList? {
         lock.lock(); defer { lock.unlock() }
         let now = clock()
-        let usable: NodeList? = (current != nil && now <= current!.exp) ? current : nil
-        if now < nextTryAt { return usable }
-        do {
-            var found: NodeList?
-            for n in [cfg.name] + cfg.fallbackNames {
-                guard let f = try? ListVerifier.parse(queryTxt(n), publicKeyB64: cfg.publicKey, now: now) else { continue }
-                if let c = current, f.iat < c.iat { continue } // stale copy at this name; try the next
-                found = f
-                break
-            }
-            guard let fresh = found else { throw ShieldError.badResponse }
-            current = fresh
-            nextTryAt = now + Int64(cfg.refreshInterval)
-            cfg.store?.save(fresh.records)
-            return fresh
-        } catch {
-            nextTryAt = now + Int64(cfg.retryInterval)
-            return usable
+        if now < nextTryAt { return usable(now) }
+        return fetch(now)
+    }
+
+    /// Re-read now because nothing worked; at most once per `urgentRefresh`.
+    func refreshNow() -> NodeList? {
+        lock.lock(); defer { lock.unlock() }
+        let now = clock()
+        if let last = lastTryAt, Double(now - last) < cfg.urgentRefresh { return usable(now) }
+        return fetch(now)
+    }
+
+    private func usable(_ now: Int64) -> NodeList? {
+        if let c = current, now <= c.exp { return c }
+        return nil
+    }
+
+    private func fetch(_ now: Int64) -> NodeList? {
+        lastTryAt = now
+        var found: NodeList?
+        for n in [cfg.name] + cfg.fallbackNames {
+            guard let f = try? ListVerifier.parse(queryTxt(n), publicKeyB64: cfg.publicKey, now: now) else { continue }
+            if let c = current, f.iat < c.iat { continue } // stale copy at this name; try the next
+            found = f
+            break
         }
+        guard let fresh = found else {
+            nextTryAt = now + Int64(cfg.retryInterval)
+            return usable(now)
+        }
+        current = fresh
+        nextTryAt = now + Int64(cfg.refreshInterval)
+        cfg.store?.save(fresh.records)
+        return fresh
     }
 }

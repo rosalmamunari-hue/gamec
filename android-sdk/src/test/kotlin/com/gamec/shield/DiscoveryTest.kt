@@ -201,6 +201,40 @@ class DiscoveryTest {
     }
 
     @Test
+    fun refreshNowReadsAtOnceEvenWhenTheListIsFreshButNotMoreOftenThanEveryThreeSeconds() {
+        val k = newKey()
+        var now = 1000L
+        var queries = 0
+        var iat = 900L
+        val d = NodeDirectory(cfg(k, refreshSec = 600), { queries++; records(k, nodes(2), iat = iat, exp = 99_999) }, { now })
+        d.get()
+        assertEquals(1, queries)
+        now = 1001
+        iat = 950
+        d.refreshNow()                  // 1 s after the last read: too soon
+        assertEquals(1, queries)
+        now = 1003
+        val fresh = d.refreshNow()      // 3 s: reads again although the list is far from its 600 s refresh
+        assertEquals(2, queries)
+        assertEquals(950L, fresh!!.iat)
+        now = 1004
+        d.refreshNow()
+        assertEquals(2, queries)
+    }
+
+    @Test
+    fun refreshNowKeepsTheOldListWhenTheReadFails() {
+        val k = newKey()
+        var now = 1000L
+        var down = false
+        val d = NodeDirectory(cfg(k), { if (down) emptyList() else records(k, nodes(2), iat = 900, exp = 99_999) }, { now })
+        d.get()
+        down = true
+        now = 1010
+        assertEquals(2, d.refreshNow()!!.nodes.size)
+    }
+
+    @Test
     fun directoryNeverGoesBackToAnOlderList() {
         val k = newKey()
         var now = 1000L
