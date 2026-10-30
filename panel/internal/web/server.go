@@ -150,6 +150,13 @@ func (l *limiter) allow(key string, now time.Time) bool {
 		return false
 	}
 	l.hits[key] = append(kept, now)
+	if len(l.hits) > 10000 { // many addresses (IPv6 makes that cheap): drop the ones whose attempts are all old
+		for k, ts := range l.hits {
+			if len(ts) == 0 || now.Sub(ts[len(ts)-1]) >= l.window {
+				delete(l.hits, k)
+			}
+		}
+	}
 	return true
 }
 

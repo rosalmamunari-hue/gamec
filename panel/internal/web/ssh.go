@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -85,6 +86,9 @@ func (s *Server) sshSettings(w http.ResponseWriter, r *http.Request, _ *auth.Ses
 	user, unit := strings.TrimSpace(r.FormValue("ssh_user")), strings.TrimSpace(r.FormValue("unit"))
 	err := s.Store.Mutate(func(st *store.State) error {
 		x := st.Node(n.ID)
+		if x == nil {
+			return errors.New("this node was just removed")
+		}
 		hostChanged := x.SSHPort != port
 		x.SSHUser, x.SSHPort, x.Unit = user, port, unit
 		if hostChanged {
@@ -129,7 +133,14 @@ func (s *Server) hostKey(w http.ResponseWriter, r *http.Request, _ *auth.Session
 		s.renderNode(w, r, nodePageData{Cluster: c, Node: n}, "", "服务器出示的密钥和你刚才看到的不一样。没有保存任何东西。", http.StatusConflict)
 		return
 	}
-	if err := s.Store.Mutate(func(st *store.State) error { st.Node(n.ID).HostKey = fp; return nil }); err != nil {
+	if err := s.Store.Mutate(func(st *store.State) error {
+		x := st.Node(n.ID)
+		if x == nil {
+			return errors.New("this node was just removed")
+		}
+		x.HostKey = fp
+		return nil
+	}); err != nil {
 		s.renderNode(w, r, nodePageData{Cluster: c, Node: n}, "", err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -273,6 +284,8 @@ func (s *Server) upgradeAll(w http.ResponseWriter, r *http.Request, sess *auth.S
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Minute)
+	// the server's write timeout (10 minutes) would otherwise drop the answer to a long rolling upgrade
+	http.NewResponseController(w).SetWriteDeadline(time.Now().Add(21 * time.Minute))
 	defer cancel()
 	b, err := s.releases().Fetch(ctx, tag, "edge-linux-amd64")
 	if err != nil {

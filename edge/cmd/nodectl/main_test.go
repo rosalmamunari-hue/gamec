@@ -354,3 +354,21 @@ func TestVersion(t *testing.T) {
 		t.Fatal(code, err, out.String())
 	}
 }
+
+// The staging directory belongs to the unprivileged account; a symlink there must not make root read (and
+// install) some other file.
+func TestAStagedSymlinkIsRefused(t *testing.T) {
+	e, sys, _ := newEnv(t)
+	e.write(t, "/opt/gamec-edge/edge", elf("v1"))
+	other := elf("some other program")
+	e.write(t, "/opt/gamec-edge/other", other)
+	if err := os.Symlink(e.path("/opt/gamec-edge/other"), e.path(stagedFile("gamec-edge"))); err != nil {
+		t.Skipf("cannot make a symlink here: %v", err)
+	}
+	if _, err := e.dispatch([]string{"install", "-sha256", sum(other)}); err == nil || !strings.Contains(err.Error(), "not a plain file") {
+		t.Fatalf("a symlink was followed: %v", err)
+	}
+	if sys.called("systemctl restart gamec-edge") != 0 || sum(e.read(t, "/opt/gamec-edge/edge")) != sum(elf("v1")) {
+		t.Fatal("something was installed")
+	}
+}

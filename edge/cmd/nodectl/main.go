@@ -208,23 +208,23 @@ func (e *env) install(unit, wantSHA string) error {
 		return errors.New("-sha256 must be 64 lowercase hex characters")
 	}
 	staged := e.path(stagedFile(unit))
-	info, err := os.Stat(staged)
+	// Read once and check, hash and install those same bytes: the staging directory belongs to the
+	// unprivileged account, which could otherwise swap the file (or put a symlink there) in between.
+	data, err := readStaged(staged)
 	if err != nil {
-		return fmt.Errorf("nothing staged at %s", stagedFile(unit))
-	}
-	if info.Size() < minBinary || info.Size() > maxBinary {
 		os.Remove(staged)
-		return fmt.Errorf("the staged file is %d bytes, which is not a plausible edge node", info.Size())
-	}
-	got, err := fileSHA(staged)
-	if err != nil {
 		return err
 	}
-	if got != wantSHA {
+	if len(data) < minBinary || len(data) > maxBinary {
+		os.Remove(staged)
+		return fmt.Errorf("the staged file is %d bytes, which is not a plausible edge node", len(data))
+	}
+	sum := sha256.Sum256(data)
+	if got := hex.EncodeToString(sum[:]); got != wantSHA {
 		os.Remove(staged)
 		return fmt.Errorf("checksum mismatch: staged file is %s, expected %s", got, wantSHA)
 	}
-	if hdr, err := readHead(staged, 4); err != nil || string(hdr) != "\x7fELF" {
+	if string(data[:4]) != "\x7fELF" {
 		os.Remove(staged)
 		return errors.New("the staged file is not an executable program")
 	}
@@ -236,7 +236,7 @@ func (e *env) install(unit, wantSHA string) error {
 			return fmt.Errorf("could not keep the previous version: %w", err)
 		}
 	}
-	if err := copyFile(staged, tmp, 0o755); err != nil {
+	if err := os.WriteFile(tmp, data, 0o755); err != nil {
 		return err
 	}
 	if err := os.Rename(tmp, cur); err != nil {
@@ -270,15 +270,29 @@ func (e *env) restoreOld(unit string) error {
 	return e.control(unit, "restart")
 }
 
-func readHead(path string, n int) ([]byte, error) {
+// readStaged reads the staged program, refusing anything but a plain file that stayed the same file
+// while it was opened (a symlink swapped in after the check would open something else).
+func readStaged(path string) ([]byte, error) {
+	before, err := os.Lstat(path)
+	if err != nil {
+		return nil, errors.New("nothing staged")
+	}
+	if !before.Mode().IsRegular() {
+		return nil, errors.New("the staged file is not a plain file")
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	b := make([]byte, n)
-	_, err = io.ReadFull(f, b)
-	return b, err
+	opened, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !os.SameFile(before, opened) {
+		return nil, errors.New("the staged file changed while it was being read")
+	}
+	return io.ReadAll(io.LimitReader(f, maxBinary+1))
 }
 
 func copyFile(src, dst string, mode os.FileMode) error {

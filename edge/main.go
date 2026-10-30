@@ -28,8 +28,8 @@ import (
 )
 
 var (
-	listen   = flag.String("listen", ":30800", "listen address")
-	origin   = flag.String("origin", "127.0.0.1:9000", "hidden origin address")
+	listen     = flag.String("listen", ":30800", "listen address")
+	origin     = flag.String("origin", "127.0.0.1:9000", "hidden origin address")
 	secret     = flag.String("secret", "", "token HMAC secret (visible to local users in the process list: prefer -secret-file)")
 	secretFile = flag.String("secret-file", "", "file holding the token HMAC secret")
 	certFile   = flag.String("cert", "", "TLS cert (PEM)")

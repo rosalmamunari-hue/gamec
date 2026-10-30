@@ -88,6 +88,7 @@ func (l *Log) Append(e Entry) error {
 	}
 	b = append(b, '\n')
 	if _, err := f.Write(b); err != nil {
+		f.Truncate(size) // a half-written line would make the next start refuse the log
 		return err
 	}
 	if err := f.Sync(); err != nil {

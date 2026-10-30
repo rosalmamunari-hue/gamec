@@ -260,7 +260,7 @@ func TestMixedRecordSetsAreJudgedLikeTheApps(t *testing.T) {
 	k := key(t)
 	now := time.Now()
 	short, _ := BuildRecords(k, manyNodes(1), now.Add(-time.Minute), time.Hour) // one bare record
-	long, _ := BuildRecords(k, manyNodes(60), now, time.Hour)                 // numbered records
+	long, _ := BuildRecords(k, manyNodes(60), now, time.Hour)                   // numbered records
 	if len(short) != 1 || len(long) < 2 {
 		t.Fatalf("setup: %d %d", len(short), len(long))
 	}
