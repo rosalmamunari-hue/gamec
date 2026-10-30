@@ -115,6 +115,29 @@ final class ShieldTests: XCTestCase {
         XCTAssertNil(echo(viaProxyPort: proxyPort, text: "ping"))
     }
 
+    func testDiscoveryModeFindsNodesViaDohAndGetsATokenFromTheNode() throws {
+        let env = ProcessInfo.processInfo.environment
+        try XCTSkipIf(env["GAMEC_TEST_DOH_URL"] == nil || env["GAMEC_TEST_LIST_KEY"] == nil, "discovery env not set")
+        let d = try DiscoveryConfig(name: "_gs.example.com", publicKey: env["GAMEC_TEST_LIST_KEY"]!,
+                                    deviceId: "device-ios-e2e-000000003", dohProviders: [env["GAMEC_TEST_DOH_URL"]!])
+        let shield = ShieldClient(config: ShieldConfig(discovery: d))
+        let proxyPort = try shield.start()
+        defer { shield.stop() }
+        XCTAssertEqual(echo(viaProxyPort: proxyPort, text: "ping"), "ping")
+    }
+
+    func testDiscoveryModeRefusesAListSignedByTheWrongKey() throws {
+        let env = ProcessInfo.processInfo.environment
+        try XCTSkipIf(env["GAMEC_TEST_DOH_URL"] == nil, "discovery env not set")
+        let wrong = P256.Signing.PrivateKey().publicKey.derRepresentation.base64EncodedString()
+        let d = try DiscoveryConfig(name: "_gs.example.com", publicKey: wrong,
+                                    deviceId: "device-ios-e2e-000000004", dohProviders: [env["GAMEC_TEST_DOH_URL"]!])
+        let shield = ShieldClient(config: ShieldConfig(discovery: d))
+        let proxyPort = try shield.start()
+        defer { shield.stop() }
+        XCTAssertNil(echo(viaProxyPort: proxyPort, text: "ping"))
+    }
+
     func testFailoverSkipsDeadNode() throws {
         try XCTSkipIf(secret.isEmpty, "GAMEC_TEST_SECRET not set")
         let dead = Node(host: host, port: 1, pinSha256: pin)

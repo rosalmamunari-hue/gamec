@@ -10,7 +10,7 @@ import Network
 public final class ShieldClient {
     private let cfg: ShieldConfig
     private let selector: NodeSelector
-    private let sessions: SessionManager?
+    private let source: Source
     private let queue = DispatchQueue(label: "gamec.shield")
     private var listener: NWListener?
     private var probeTimer: DispatchSourceTimer?
@@ -18,13 +18,13 @@ public final class ShieldClient {
     public init(config: ShieldConfig) {
         cfg = config
         selector = NodeSelector(nodes: config.nodes, cooldown: config.failCooldown)
-        sessions = config.control.map { SessionManager(cfg: $0) }
+        source = config.makeSource()
     }
 
     /// Refreshes the session (blocking, so never on the shield queue) and re-measures every node.
     private func refreshAndProbe() {
         DispatchQueue.global().async { [self] in
-            if let s = sessions?.get() { selector.update(s.nodes) }
+            if let n = source.nodes() { selector.update(n) }
             selector.probeAll(timeout: cfg.connectTimeout, queue: queue)
         }
     }
@@ -69,17 +69,16 @@ public final class ShieldClient {
         local.start(queue: queue)
         // Fetching a session or calling tokenProvider may block, so keep it off the shield queue.
         DispatchQueue.global().async { [self] in
-            let token: Data
-            if let sessions = sessions {
-                guard let s = sessions.get() else {
-                    queue.async { local.cancel() }
-                    return
-                }
-                selector.update(s.nodes)
-                token = Data(s.token.utf8)
-            } else {
-                token = Data(cfg.tokenProvider!().utf8)
+            guard let nodes = source.nodes() else {
+                queue.async { local.cancel() }
+                return
             }
+            selector.update(nodes)
+            guard let tokenString = source.token(ordered: selector.ordered()) else {
+                queue.async { local.cancel() }
+                return
+            }
+            let token = Data(tokenString.utf8)
             queue.async { self.openUpstream(nodes: self.selector.ordered(), token: token, local: local) }
         }
     }
