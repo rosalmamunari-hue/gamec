@@ -197,6 +197,25 @@ class DeviceTest {
         }
     }
 
+    /** Each DoT server on its own against real DNS, with the reason when one fails (needs `-e liveName`). */
+    @Test
+    fun dotWorksOnThisAndroid() {
+        val name = args.getString("liveName") ?: ""
+        assumeTrue("live args not given", name.isNotEmpty())
+        var ok = 0
+        for (server in DnsDefaults.dot) {
+            val t0 = System.nanoTime()
+            try {
+                val recs = Dot.query(server, 853, name, 5000)
+                android.util.Log.i("GamecDot", "$server ok ${(System.nanoTime() - t0) / 1_000_000}ms, ${recs.size} record(s)")
+                if (recs.isNotEmpty()) ok++
+            } catch (e: Exception) {
+                android.util.Log.i("GamecDot", "$server FAILED after ${(System.nanoTime() - t0) / 1_000_000}ms: $e")
+            }
+        }
+        assertTrue("no DoT server worked on this Android", ok > 0)
+    }
+
     @Test
     fun deviceIdIsStableAndValid() {
         val ctx = InstrumentationRegistry.getInstrumentation().targetContext
