@@ -1,27 +1,20 @@
 // signlist signs the node list OFFLINE and prints it as DNS TXT records.
 //
-// Run it on your own computer; the signing private key must never be placed on a server. Apps embed only
-// the public key and refuse any list whose signature does not verify, so DNS spoofing can at worst make
-// the list unavailable, never redirect players.
+// Run it on your own computer; the signing private key must never be placed on a server that does not need
+// it. Apps embed only the public key and refuse any list whose signature does not verify, so DNS spoofing
+// can at worst make the list unavailable, never redirect players.
 //
 //	signlist -gen-key list.key                       create the signing key, print the public key
 //	signlist -key list.key -nodes nodes.json         print TXT records (add each as a TXT record)
 //	signlist -key list.key -nodes nodes.json -serve 127.0.0.1:8053   fake DoH server for tests
+//	signlist -check _gs.example.com -pub <key>       fetch the published records over DoH and verify them
 //
 // nodes.json: [{"host":"1.2.3.4","port":30800,"pin":"<from gencert>","enabled":true}, ...]
 //
-// Record format: "gs1:<i>/<n>:<chunk>"; the chunks joined are base64url(payload) "." base64url(signature),
-// where signature is ASN.1 ECDSA P-256 over SHA-256(payload) and payload is
-// {"v":1,"iat":unix,"exp":unix,"nodes":[{"h":host,"p":port,"k":pin}]}.
+// The format itself lives in the shieldlist package, shared with the control panel.
 package main
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/sha256"
-	"crypto/x509"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -29,26 +22,10 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"sort"
-	"strconv"
-	"strings"
 	"time"
+
+	"gamec/edge/shieldlist"
 )
-
-const chunkSize = 200 // keeps every record comfortably inside one 255-byte TXT string
-
-type listNode struct {
-	H string `json:"h"`
-	P int    `json:"p"`
-	K string `json:"k"`
-}
-
-type listPayload struct {
-	V     int        `json:"v"`
-	Iat   int64      `json:"iat"`
-	Exp   int64      `json:"exp"`
-	Nodes []listNode `json:"nodes"`
-}
 
 type nodeFile struct {
 	Host    string `json:"host"`
@@ -57,7 +34,7 @@ type nodeFile struct {
 	Enabled *bool  `json:"enabled"`
 }
 
-func loadNodes(path string) ([]listNode, error) {
+func loadNodes(path string) ([]shieldlist.Node, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -66,7 +43,7 @@ func loadNodes(path string) ([]listNode, error) {
 	if err := json.Unmarshal(b, &all); err != nil {
 		return nil, err
 	}
-	var out []listNode
+	var out []shieldlist.Node
 	for _, n := range all {
 		if n.Enabled != nil && !*n.Enabled {
 			continue
@@ -74,7 +51,7 @@ func loadNodes(path string) ([]listNode, error) {
 		if n.Host == "" || n.Port <= 0 || n.Port > 65535 || n.Pin == "" {
 			return nil, fmt.Errorf("incomplete node entry: %+v", n)
 		}
-		out = append(out, listNode{n.Host, n.Port, n.Pin})
+		out = append(out, shieldlist.Node{H: n.Host, P: n.Port, K: n.Pin})
 	}
 	if len(out) == 0 {
 		return nil, errors.New("no enabled nodes")
@@ -82,111 +59,9 @@ func loadNodes(path string) ([]listNode, error) {
 	return out, nil
 }
 
-func loadKey(path string) (*ecdsa.PrivateKey, error) {
+func loadKey(path string) (string, error) {
 	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	der, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(b)))
-	if err != nil {
-		return nil, errors.New("key file must be base64")
-	}
-	k, err := x509.ParseECPrivateKey(der)
-	if err != nil || k.Curve != elliptic.P256() {
-		return nil, errors.New("key must be a P-256 EC private key")
-	}
-	return k, nil
-}
-
-func publicKeyB64(k *ecdsa.PrivateKey) string {
-	der, _ := x509.MarshalPKIXPublicKey(&k.PublicKey)
-	return base64.StdEncoding.EncodeToString(der)
-}
-
-// buildRecords signs the list and splits it into TXT record values.
-func buildRecords(k *ecdsa.PrivateKey, nodes []listNode, now time.Time, valid time.Duration) ([]string, error) {
-	payload, err := json.Marshal(listPayload{V: 1, Iat: now.Unix(), Exp: now.Add(valid).Unix(), Nodes: nodes})
-	if err != nil {
-		return nil, err
-	}
-	digest := sha256.Sum256(payload)
-	sig, err := ecdsa.SignASN1(rand.Reader, k, digest[:])
-	if err != nil {
-		return nil, err
-	}
-	enc := base64.RawURLEncoding
-	body := enc.EncodeToString(payload) + "." + enc.EncodeToString(sig)
-
-	var chunks []string
-	for len(body) > chunkSize {
-		chunks = append(chunks, body[:chunkSize])
-		body = body[chunkSize:]
-	}
-	chunks = append(chunks, body)
-	recs := make([]string, len(chunks))
-	for i, c := range chunks {
-		recs[i] = fmt.Sprintf("gs1:%d/%d:%s", i+1, len(chunks), c)
-	}
-	return recs, nil
-}
-
-// verifyRecords reassembles the records and checks the signature (what the apps do).
-func verifyRecords(records []string, pub *ecdsa.PublicKey, now time.Time) (*listPayload, error) {
-	parts := map[int]string{}
-	total := 0
-	for _, r := range records {
-		if !strings.HasPrefix(r, "gs1:") {
-			continue
-		}
-		f := strings.SplitN(r[4:], ":", 2)
-		if len(f) != 2 {
-			continue
-		}
-		pos := strings.SplitN(f[0], "/", 2)
-		if len(pos) != 2 {
-			continue
-		}
-		i, err1 := strconv.Atoi(pos[0])
-		n, err2 := strconv.Atoi(pos[1])
-		if err1 != nil || err2 != nil || i < 1 || i > n {
-			continue
-		}
-		total = n
-		parts[i] = f[1]
-	}
-	if total == 0 || len(parts) != total {
-		return nil, errors.New("incomplete record set")
-	}
-	idx := make([]int, 0, total)
-	for i := range parts {
-		idx = append(idx, i)
-	}
-	sort.Ints(idx)
-	var sb strings.Builder
-	for _, i := range idx {
-		sb.WriteString(parts[i])
-	}
-	f := strings.SplitN(sb.String(), ".", 2)
-	if len(f) != 2 {
-		return nil, errors.New("malformed list")
-	}
-	payload, err1 := base64.RawURLEncoding.DecodeString(f[0])
-	sig, err2 := base64.RawURLEncoding.DecodeString(f[1])
-	if err1 != nil || err2 != nil {
-		return nil, errors.New("malformed base64")
-	}
-	digest := sha256.Sum256(payload)
-	if !ecdsa.VerifyASN1(pub, digest[:], sig) {
-		return nil, errors.New("signature invalid")
-	}
-	var p listPayload
-	if err := json.Unmarshal(payload, &p); err != nil || p.V != 1 || len(p.Nodes) == 0 {
-		return nil, errors.New("bad payload")
-	}
-	if now.Unix() > p.Exp {
-		return nil, errors.New("list expired")
-	}
-	return &p, nil
+	return string(b), err
 }
 
 // dohHandler answers like Cloudflare's JSON DoH API; each record is returned as two quoted strings
@@ -218,16 +93,10 @@ func checkDNS(name, pub, doh string) {
 	if pub == "" {
 		log.Fatal("-check needs -pub <base64 public key>")
 	}
-	der, err := base64.StdEncoding.DecodeString(pub)
+	pk, err := shieldlist.ParsePublicKeyB64(pub)
 	if err != nil {
 		log.Fatal("bad -pub: ", err)
 	}
-	anyKey, err := x509.ParsePKIXPublicKey(der)
-	pk, ok := anyKey.(*ecdsa.PublicKey)
-	if err != nil || !ok {
-		log.Fatal("-pub is not a P-256 public key")
-	}
-
 	req, _ := http.NewRequest("GET", doh+"?name="+name+"&type=TXT", nil)
 	req.Header.Set("accept", "application/dns-json")
 	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
@@ -249,11 +118,11 @@ func checkDNS(name, pub, doh string) {
 	var recs []string
 	for _, a := range reply.Answer {
 		if a.Type == 16 {
-			recs = append(recs, joinTxtStrings(a.Data))
+			recs = append(recs, shieldlist.JoinTxtStrings(a.Data))
 		}
 	}
 	fmt.Printf("DoH status %d, %d TXT record(s) at %s\n", reply.Status, len(recs), name)
-	p, err := verifyRecords(recs, pk, time.Now())
+	p, err := shieldlist.VerifyRecords(recs, pk, time.Now())
 	if err != nil {
 		fmt.Println("FAIL:", err)
 		os.Exit(1)
@@ -264,32 +133,6 @@ func checkDNS(name, pub, doh string) {
 	for _, n := range p.Nodes {
 		fmt.Printf("     node %s:%d pin %s\n", n.H, n.P, n.K)
 	}
-}
-
-// joinTxtStrings turns `"part1" "part2"` into part1part2.
-func joinTxtStrings(s string) string {
-	s = strings.TrimSpace(s)
-	if !strings.HasPrefix(s, `"`) {
-		return s
-	}
-	var sb strings.Builder
-	in, esc := false, false
-	for _, c := range s {
-		switch {
-		case in && esc:
-			sb.WriteRune(c)
-			esc = false
-		case in && c == '\\':
-			esc = true
-		case in && c == '"':
-			in = false
-		case in:
-			sb.WriteRune(c)
-		case c == '"':
-			in = true
-		}
-	}
-	return sb.String()
 }
 
 func main() {
@@ -312,20 +155,27 @@ func main() {
 		if _, err := os.Stat(*gen); err == nil {
 			log.Fatalf("%s already exists; refusing to overwrite (apps embed the matching public key)", *gen)
 		}
-		k, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-		der, _ := x509.MarshalECPrivateKey(k)
-		if err := os.WriteFile(*gen, []byte(base64.StdEncoding.EncodeToString(der)+"\n"), 0o600); err != nil {
+		k, err := shieldlist.GenerateKey()
+		if err != nil {
+			log.Fatal(err)
+		}
+		enc, _ := shieldlist.PrivateKeyB64(k)
+		if err := os.WriteFile(*gen, []byte(enc+"\n"), 0o600); err != nil {
 			log.Fatal(err)
 		}
 		fmt.Println("private key written to", *gen, "(keep it OFF the servers)")
-		fmt.Println("public key (embed in the app):", publicKeyB64(k))
+		fmt.Println("public key (embed in the app):", shieldlist.PublicKeyB64(&k.PublicKey))
 		return
 	}
 
 	if *keyPath == "" {
 		log.Fatal("-key is required (create one with -gen-key)")
 	}
-	k, err := loadKey(*keyPath)
+	raw, err := loadKey(*keyPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	k, err := shieldlist.ParsePrivateKeyB64(raw)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -333,11 +183,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	recs, err := buildRecords(k, nodes, time.Now(), time.Duration(*days)*24*time.Hour)
+	valid := time.Duration(*days) * 24 * time.Hour
+	recs, err := shieldlist.BuildRecords(k, nodes, time.Now(), valid)
 	if err != nil {
 		log.Fatal(err)
 	}
-	if _, err := verifyRecords(recs, &k.PublicKey, time.Now()); err != nil {
+	if _, err := shieldlist.VerifyRecords(recs, &k.PublicKey, time.Now()); err != nil {
 		log.Fatalf("self-check failed: %v", err)
 	}
 
@@ -345,7 +196,7 @@ func main() {
 	for _, r := range recs {
 		fmt.Println(r)
 	}
-	fmt.Printf("\nvalid until %s, %d node(s)\n", time.Now().Add(time.Duration(*days)*24*time.Hour).Format("2006-01-02"), len(nodes))
+	fmt.Printf("\nvalid until %s, %d node(s)\n", time.Now().Add(valid).Format("2006-01-02"), len(nodes))
 
 	if *serve != "" {
 		fmt.Println("serving fake DoH on", *serve)
