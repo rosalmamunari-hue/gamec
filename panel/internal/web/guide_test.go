@@ -32,7 +32,7 @@ func TestABadTokenIsSavedButExplainedInPlainWords(t *testing.T) {
 		return nil, errors.New("cloudflare: 6003 Invalid request headers")
 	}
 	_, body, _ := a.post("/secrets", url.Values{"csrf": {a.csrf()}, "ref": {"main"}, "field": {"api_token"}, "value": {"bad"}}, nil)
-	if !strings.Contains(body, "令牌有問題") || !strings.Contains(body, "Cloudflare 不認這個令牌") || strings.Contains(body, "6003") {
+	if !strings.Contains(body, "令牌有问题") || !strings.Contains(body, "Cloudflare 不认这个令牌") || strings.Contains(body, "6003") {
 		t.Fatal("a rejected token should get a plain explanation, not an API error code")
 	}
 }
@@ -47,7 +47,7 @@ func TestTheTestButtonChecksAStoredToken(t *testing.T) {
 		t.Fatal("test failed")
 	}
 	_, body, _ = a.post("/secrets/test", url.Values{"csrf": {a.csrf()}, "ref": {"nothere"}}, nil)
-	if !strings.Contains(body, "找不到名為") {
+	if !strings.Contains(body, "找不到名为") {
 		t.Fatal("a missing token should say so")
 	}
 }
@@ -80,7 +80,7 @@ func TestADomainTheTokenCannotManageIsRefusedClearly(t *testing.T) {
 	e.vault.Set("dns/main/api_token", "tok")
 	e.s.CFZones = fakeZones("example.com")
 	st, body, _ := a.post("/cluster/"+cl.ID+"/target", url.Values{"csrf": {a.csrf()}, "provider": {"cloudflare"}, "dns_name": {"cfg.stranger.org"}}, nil)
-	if st != http.StatusBadRequest || !strings.Contains(body, "example.com") || !strings.Contains(body, "沒有") {
+	if st != http.StatusBadRequest || !strings.Contains(body, "example.com") || !strings.Contains(body, "没有") {
 		t.Fatalf("%d", st)
 	}
 }
@@ -90,7 +90,7 @@ func TestTheChannelPageListsWhatToDoNextInOrder(t *testing.T) {
 	a := e.admin()
 	cl := e.seedCluster("official")
 	_, body, _ := a.get("/cluster/" + cl.ID)
-	for _, want := range []string{"解鎖保險庫", "貼上 Cloudflare 令牌", "選好要寫入哪些域名", "加入節點", "把名單寫進域名", "還差"} {
+	for _, want := range []string{"解锁保险库", "粘贴 Cloudflare 令牌", "选好要写入哪些域名", "加入节点", "把名单写进域名", "还差"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the checklist is missing %q", want)
 		}

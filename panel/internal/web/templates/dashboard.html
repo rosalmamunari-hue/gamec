@@ -1,16 +1,16 @@
 {{template "head" .}}
-<p class="lead">一個「渠道」就是一組獨立的節點、域名和密鑰（比如一個渠道服）。這裡能看到每個渠道現在好不好。</p>
-{{if .Admin}}<p><a class="btn primary" href="/cluster/new">＋ 新增渠道</a></p>{{end}}
-{{if not .Data}}<div class="card"><p class="muted">還沒有渠道。{{if .Admin}}點上面的「新增渠道」建一個，或在伺服器上用 <code>panel import-cluster</code> 把舊的匯入進來。{{end}}</p></div>{{end}}
+<p class="lead">一个「渠道」就是一组独立的节点、域名和密钥（比如一个渠道服）。这里能看到每个渠道现在好不好。</p>
+{{if .Admin}}<p><a class="btn primary" href="/cluster/new">＋ 添加渠道</a></p>{{end}}
+{{if not .Data}}<div class="card"><p class="muted">还没有渠道。{{if .Admin}}点上面的「添加渠道」建一个，或在服务器上用 <code>panel import-cluster</code> 把旧的导入进来。{{end}}</p></div>{{end}}
 <div class="grid">
 {{range .Data}}
   <section class="card">
     <div class="section-head">
       <h2><a href="/cluster/{{.C.ID}}">{{.C.Name}}</a></h2>
-      <span class="pill {{if eq .OK .All}}ok{{else if eq .OK 0}}bad{{else}}warn{{end}}">{{.OK}} / {{.All}} 個節點正常</span>
+      <span class="pill {{if eq .OK .All}}ok{{else if eq .OK 0}}bad{{else}}warn{{end}}">{{.OK}} / {{.All}} 个节点正常</span>
     </div>
     {{range .Alerts}}<div class="alert">&#9888; {{.}}</div>{{end}}
-    <p class="muted small">名單有效期：{{.Expiry}} · 自動更新：{{if .C.AutoPublish}}開{{else}}關{{end}}</p>
+    <p class="muted small">名单有效期：{{.Expiry}} · 自动更新：{{if .C.AutoPublish}}开{{else}}关{{end}}</p>
     <ul class="nodes">
     {{range .Nodes}}
       <li class="node {{.Status}}"><span class="dot"></span><b>{{.N.Name}}</b> <code>{{.N.Host}}:{{.N.Port}}</code>
@@ -18,7 +18,7 @@
     {{end}}
     </ul>
     {{if .Next}}<div class="next-line">下一步：<b>{{.Next.Title}}</b> <a href="{{.Next.Href}}">{{.Next.Link}} →</a></div>
-    {{else}}<div class="next-line done">&#10003; 一切就緒，面板會自動維護。</div>{{end}}
+    {{else}}<div class="next-line done">&#10003; 一切就绪，面板会自动维护。</div>{{end}}
   </section>
 {{end}}
 </div>

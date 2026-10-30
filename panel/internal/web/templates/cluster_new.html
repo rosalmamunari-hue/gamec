@@ -1,23 +1,23 @@
 {{template "head" .}}
-<p class="lead">新增一個全新的渠道。面板會為它生成一套新的簽名密鑰，存進保險庫。（要把舊的渠道原樣搬進來，請用 <code>panel import-cluster</code>。）</p>
+<p class="lead">添加一个全新的渠道。面板会为它生成一套新的签名密钥，存进保险库。（要把旧的渠道原样搬进来，请用 <code>panel import-cluster</code>。）</p>
 <form method="post" action="/cluster/new" class="card stack">
   <input type="hidden" name="csrf" value="{{.CSRF}}">
-  <label>渠道名稱 <span class="hint">比如渠道服的名字，方便你認。</span><input name="name" required></label>
-  <label>遊戲伺服器位址（選填） <span class="hint">節點最終把流量轉到哪裡，只是記一筆備註，比如 <code>203.0.113.5:10443</code>。</span><input name="origin" placeholder="203.0.113.5:10443"></label>
-  <label>名單每次有效幾天 <input name="valid_days" value="30" size="4" required></label>
-  <label>到期前幾天開始續期 <input name="renew_days" value="10" size="4" required></label>
-  <h2>名單要寫進哪個域名</h2>
-  <p class="muted small">之後還可以在渠道頁增加或更換。</p>
-  <label>服務商
+  <label>渠道名称 <span class="hint">比如渠道服的名字，方便你认。</span><input name="name" required></label>
+  <label>游戏服务器地址（选填） <span class="hint">节点最终把流量转到哪里，只是记一笔备注，比如 <code>203.0.113.5:10443</code>。</span><input name="origin" placeholder="203.0.113.5:10443"></label>
+  <label>名单每次有效几天 <input name="valid_days" value="30" size="4" required></label>
+  <label>到期前几天开始续期 <input name="renew_days" value="10" size="4" required></label>
+  <h2>名单要写进哪个域名</h2>
+  <p class="muted small">之后还可以在渠道页增加或更换。</p>
+  <label>服务商
     <select name="provider">
-      <option value="cloudflare">Cloudflare（推薦，自動寫入）</option>
-      <option value="spaceship">Spaceship（自動寫入）</option>
-      <option value="aliyun">阿里雲（自動寫入）</option>
-      <option value="manual">手動（面板只生成記錄，你自己貼）</option>
+      <option value="cloudflare">Cloudflare（推荐，自动写入）</option>
+      <option value="spaceship">Spaceship（自动写入）</option>
+      <option value="aliyun">阿里云（自动写入）</option>
+      <option value="manual">手动（面板只生成记录，你自己贴）</option>
     </select></label>
-  <label>完整網域 <span class="hint">比如 <code>cfg.example.com</code>。別用域名本身。</span><input name="dns_name" placeholder="cfg.example.com" required></label>
-  <label>主域名（Cloudflare 可留空） <span class="hint">你註冊的域名，比如 <code>example.com</code>。</span><input name="zone" placeholder="example.com"></label>
-  <label>用哪個授權（手動的不用填） <span class="hint">在「域名授權」頁存的名字，一般是 <code>main</code>。</span><input name="cred_ref" placeholder="main"></label>
-  <button class="primary">建立渠道</button>
+  <label>完整网域 <span class="hint">比如 <code>cfg.example.com</code>。别用域名本身。</span><input name="dns_name" placeholder="cfg.example.com" required></label>
+  <label>主域名（Cloudflare 可留空） <span class="hint">你注册的域名，比如 <code>example.com</code>。</span><input name="zone" placeholder="example.com"></label>
+  <label>用哪个授权（手动的不用填） <span class="hint">在「域名授权」页存的名字，一般是 <code>main</code>。</span><input name="cred_ref" placeholder="main"></label>
+  <button class="primary">创建渠道</button>
 </form>
 {{template "foot" .}}

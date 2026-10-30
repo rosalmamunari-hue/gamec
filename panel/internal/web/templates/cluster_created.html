@@ -1,12 +1,12 @@
 {{template "head" .}}
-<div class="banner warn"><b>現在就把下面的「連線密鑰」複製存好。</b>它只會在這一頁出現一次，之後只能在面板所在的伺服器上用 <code>panel get-secret</code> 讀。</div>
+<div class="banner warn"><b>现在就把下面的「连接密钥」拷贝存好。</b>它只会在这一页出现一次，之后只能在面板所在的服务器上用 <code>panel get-secret</code> 读。</div>
 <section class="card">
   <dl>
     <dt>渠道</dt><dd>{{.Data.Cluster.Name}}</dd>
-    <dt>連線密鑰（給這個渠道的每個節點，啟動時用 <code>-secret</code> 參數帶上）</dt><dd><code class="wrap">{{.Data.NodeSecret}}</code></dd>
-    <dt>公鑰（填進 App；公開的，不是祕密）</dt><dd><code class="wrap">{{.Data.PublicKey}}</code></dd>
+    <dt>连接密钥（给这个渠道的每个节点，启动时用 <code>-secret</code> 参数带上）</dt><dd><code class="wrap">{{.Data.NodeSecret}}</code></dd>
+    <dt>公钥（填进 App；公开的，不是秘密）</dt><dd><code class="wrap">{{.Data.PublicKey}}</code></dd>
   </dl>
-  <p>接下來：加節點、貼 Cloudflare 令牌、更新一次名單。渠道頁上有一步一步的清單帶你做。</p>
-  <p><a class="btn primary" href="/cluster/{{.Data.Cluster.ID}}">打開這個渠道</a></p>
+  <p>接下来：加节点、贴 Cloudflare 令牌、更新一次名单。渠道页上有一步一步的清单带你做。</p>
+  <p><a class="btn primary" href="/cluster/{{.Data.Cluster.ID}}">打开这个渠道</a></p>
 </section>
 {{template "foot" .}}

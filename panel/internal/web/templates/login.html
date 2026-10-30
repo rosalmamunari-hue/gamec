@@ -1,9 +1,9 @@
 {{template "head" .}}
 <form method="post" action="/login" class="card narrow">
-  <label>帳號 <input name="user" autocomplete="username" required autofocus></label>
-  <label>密碼 <input name="password" type="password" autocomplete="current-password" required></label>
-  <label>手機驗證碼 <span class="hint">打開手機上的驗證器 App（Google Authenticator 之類），輸入 6 位數字。</span>
+  <label>帐号 <input name="user" autocomplete="username" required autofocus></label>
+  <label>密码 <input name="password" type="password" autocomplete="current-password" required></label>
+  <label>手机验证码 <span class="hint">打开手机上的验证器 App（Google Authenticator 之类），输入 6 位数字。</span>
     <input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" required></label>
-  <button class="primary">登入</button>
+  <button class="primary">登录</button>
 </form>
 {{template "foot" .}}

@@ -1,12 +1,12 @@
 {{template "head" .}}
 <form method="post" action="/unseal" class="card narrow">
   {{if .Sealed}}
-  <p class="muted">保險庫是面板裡的加密保險箱，放著簽名密鑰和域名帳號的授權。口令只有你知道，面板不會存它，所以<b>每次面板重新啟動後都要解鎖一次</b>。</p>
+  <p class="muted">保险库是面板里的加密保险箱，放着签名密钥和域名帐号的授权。口令只有你知道，面板不会存它，所以<b>每次面板重新启动后都要解锁一次</b>。</p>
   <input type="hidden" name="csrf" value="{{.CSRF}}">
-  <label>保險庫口令 <input name="passphrase" type="password" autocomplete="off" required autofocus></label>
-  <button class="primary">解鎖</button>
+  <label>保险库口令 <input name="passphrase" type="password" autocomplete="off" required autofocus></label>
+  <button class="primary">解锁</button>
   {{else}}
-  <p>保險庫已經解鎖，不用再做什麼。</p>
+  <p>保险库已经解锁，不用再做什么。</p>
   <input type="hidden" name="csrf" value="{{.CSRF}}">
   <p><a class="btn" href="/">回到渠道</a></p>
   {{end}}

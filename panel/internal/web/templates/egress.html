@@ -1,69 +1,69 @@
 {{template "head" .}}
 {{$p := .}}
-<p class="lead">面板每次去檢查節點、管理節點，節點都會看到面板的 IP。如果節點被攻擊，攻擊者就可能順著這條線摸到面板。這裡可以讓所有連線<b>先經過一台中轉機</b>，節點只會看到中轉機的 IP，看不到面板。</p>
+<p class="lead">面板每次去检查节点、管理节点，节点都会看到面板的 IP。如果节点被攻击，攻击者就可能顺着这条线摸到面板。这里可以让所有连接<b>先经过一台中转机</b>，节点只会看到中转机的 IP，看不到面板。</p>
 <section class="card">
-  <p class="muted small">中轉機上不用裝任何軟體，它的帳號也不能執行指令，只能轉發。中轉機用不了時，連線會<b>直接失敗</b>，絕不會偷偷改成直連。</p>
+  <p class="muted small">中转机上不用装任何软件，它的帐号也不能运行指令，只能转发。中转机用不了时，连接会<b>直接失败</b>，绝不会偷偷改成直连。</p>
 </section>
 
 <section class="card">
-  <h2>中轉機</h2>
+  <h2>中转机</h2>
   {{if .Data.Cfg}}
     <p><code>{{.Data.Cfg.User}}@{{.Data.Cfg.Addr}}</code></p>
-    {{if .Data.Cfg.HostKey}}<p class="okc">&#10003; 已確認機器指紋：<code class="wrap">{{.Data.Cfg.HostKey}}</code></p>
-    {{else}}<p class="alert">機器指紋還沒確認：確認之前，面板不會向任何節點送出東西。</p>{{end}}
+    {{if .Data.Cfg.HostKey}}<p class="okc">&#10003; 已确认机器指纹：<code class="wrap">{{.Data.Cfg.HostKey}}</code></p>
+    {{else}}<p class="alert">机器指纹还没确认：确认之前，面板不会向任何节点送出东西。</p>{{end}}
   {{else}}
-    <p class="muted">還沒設定：面板直接連到節點，節點看得到面板的 IP。</p>
+    <p class="muted">还没设置：面板直接连到节点，节点看得到面板的 IP。</p>
   {{end}}
   <form method="post" action="/egress/set" class="stack">
     <input type="hidden" name="csrf" value="{{$p.CSRF}}">
-    <label>中轉機位址 <span class="hint">IP 或 IP:埠，SSH 埠預設 22。</span><input name="addr" value="{{if .Data.Cfg}}{{.Data.Cfg.Addr}}{{end}}" required></label>
-    <label>帳號 <span class="hint">一般用 <code>gamec-jump</code>。</span><input name="user" value="{{if .Data.Cfg}}{{.Data.Cfg.User}}{{else}}gamec-jump{{end}}" required></label>
-    <button>儲存</button>
+    <label>中转机地址 <span class="hint">IP 或 IP:端口，SSH 端口缺省 22。</span><input name="addr" value="{{if .Data.Cfg}}{{.Data.Cfg.Addr}}{{end}}" required></label>
+    <label>帐号 <span class="hint">一般用 <code>gamec-jump</code>。</span><input name="user" value="{{if .Data.Cfg}}{{.Data.Cfg.User}}{{else}}gamec-jump{{end}}" required></label>
+    <button>保存</button>
   </form>
   {{if .Data.Cfg}}
-  <form method="post" action="/egress/remove" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button class="danger">不用了，改回直連</button></form>
+  <form method="post" action="/egress/remove" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button class="danger">不用了，改回直连</button></form>
   {{end}}
 </section>
 
 {{if .Data.Cfg}}
 <section class="card">
-  <h2>確認中轉機是真的</h2>
+  <h2>确认中转机是真的</h2>
   {{if .Data.Fingerprint}}
-    {{if .Data.KeyChanged}}<div class="banner err"><b>和你之前確認的指紋不一樣！</b>可能是這台機器重裝過，也可能有人在攔截連線。</div>{{end}}
-    <p>這台機器出示的指紋（<code>{{.Data.KeyType}}</code>）：<code class="wrap">{{.Data.Fingerprint}}</code></p>
-    <p class="muted small">請和你在那台機器上執行腳本時印出的 ED25519 那一行比對，一模一樣才信任。</p>
+    {{if .Data.KeyChanged}}<div class="banner err"><b>和你之前确认的指纹不一样！</b>可能是这台机器重装过，也可能有人在拦截连接。</div>{{end}}
+    <p>这台机器出示的指纹（<code>{{.Data.KeyType}}</code>）：<code class="wrap">{{.Data.Fingerprint}}</code></p>
+    <p class="muted small">请和你在那台机器上运行脚本时印出的 ED25519 那一行比对，一模一样才信任。</p>
     <form method="post" action="/egress/hostkey" class="inline">
       <input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="action" value="trust"><input type="hidden" name="fingerprint" value="{{.Data.Fingerprint}}">
-      <button class="primary">一模一樣，信任它</button>
+      <button class="primary">一模一样，信任它</button>
     </form>
   {{else}}
-    <form method="post" action="/egress/hostkey" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="action" value="fetch"><button>{{if .Data.Cfg.HostKey}}重新檢查指紋{{else}}取得機器指紋{{end}}</button></form>
+    <form method="post" action="/egress/hostkey" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="action" value="fetch"><button>{{if .Data.Cfg.HostKey}}重新检查指纹{{else}}取得机器指纹{{end}}</button></form>
   {{end}}
 </section>
 
 <section class="card">
-  <h2>準備中轉機</h2>
+  <h2>准备中转机</h2>
   {{if .Data.HasKey}}
-  <p>會生成一段腳本，請先看一遍，再到中轉機上用 <b>root 執行一次</b>。它建立一個專用帳號，並且只允許轉發到你節點的位址和埠，別的地方一律不通。以後新增節點，要回來重新生成並再跑一次。</p>
+  <p>会生成一段脚本，请先看一遍，再到中转机上用 <b>root 运行一次</b>。它创建一个专用帐号，并且只允许转发到你节点的地址和端口，别的地方一律不通。以后添加节点，要回来重新生成并再跑一次。</p>
   <form method="post" action="/egress/script" class="stack">
     <input type="hidden" name="csrf" value="{{$p.CSRF}}">
-    <label>只允許從這個位址登入（建議填面板自己的 IP） <input name="from" placeholder="203.0.113.9"></label>
-    <button class="primary">生成腳本</button>
+    <label>只允许从这个地址登录（建议填面板自己的 IP） <input name="from" placeholder="203.0.113.9"></label>
+    <button class="primary">生成脚本</button>
   </form>
   {{if .Data.Script}}<pre>{{.Data.Script}}</pre>
-  <p class="muted small">然後在每台節點上，防火牆只放行<b>中轉機</b>的 IP（不要再放行面板的 IP）。</p>{{end}}
-  {{else}}<p class="alert">面板還沒有自己的密鑰。請在面板所在伺服器上執行一次 <code>panel ssh-keygen</code>。</p>{{end}}
+  <p class="muted small">然后在每台节点上，防火墙只放行<b>中转机</b>的 IP（不要再放行面板的 IP）。</p>{{end}}
+  {{else}}<p class="alert">面板还没有自己的密钥。请在面板所在服务器上运行一次 <code>panel ssh-keygen</code>。</p>{{end}}
 </section>
 
 <section class="card">
-  <h2>測試</h2>
-  <p class="muted small">經過中轉機，對每個節點各連一次，看通不通。</p>
-  <form method="post" action="/egress/test" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button>測試所有節點</button></form>
+  <h2>测试</h2>
+  <p class="muted small">经过中转机，对每个节点各连一次，看通不通。</p>
+  <form method="post" action="/egress/test" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button>测试所有节点</button></form>
   {{if .Data.Tests}}
   <div class="tablewrap">
   <table>
-    <tr><th>節點</th><th>位址</th><th>結果</th><th>耗時</th></tr>
-    {{range .Data.Tests}}<tr class="{{if .OK}}ok{{else}}fail{{end}}"><td>{{.Node}}</td><td><code>{{.Addr}}</code></td><td><span class="dot"></span>{{if .OK}}可連通{{else}}{{.Err}}{{end}}</td><td>{{.Took}}</td></tr>{{end}}
+    <tr><th>节点</th><th>地址</th><th>结果</th><th>耗时</th></tr>
+    {{range .Data.Tests}}<tr class="{{if .OK}}ok{{else}}fail{{end}}"><td>{{.Node}}</td><td><code>{{.Addr}}</code></td><td><span class="dot"></span>{{if .OK}}可连通{{else}}{{.Err}}{{end}}</td><td>{{.Took}}</td></tr>{{end}}
   </table>
   </div>
   {{end}}

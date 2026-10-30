@@ -622,7 +622,7 @@ func TestSealedVaultIsAnnouncedAndUnsealingWorks(t *testing.T) {
 	c := e.admin()
 	e.vault.Seal()
 	_, body, _ := c.get("/")
-	if !strings.Contains(body, "上鎖") {
+	if !strings.Contains(body, "上锁") {
 		t.Fatal("the dashboard does not say the vault is sealed")
 	}
 	if st, _, _ := c.post("/unseal", url.Values{"csrf": {c.csrf()}, "passphrase": {"wrong wrong wrong"}}, nil); st != http.StatusUnauthorized || !e.vault.Sealed() {
@@ -678,7 +678,7 @@ func TestEveryChangeIsAuditedWithWhoAndFromWhere(t *testing.T) {
 	v.post("/cluster/"+cl.ID+"/publish", url.Values{"csrf": {v.csrf()}}, nil)
 
 	_, body, _ := c.get("/audit")
-	for _, want := range []string{"login", "node-add", "csrf-rejected", "forbidden", "alice", "victor", "沒有被改動"} {
+	for _, want := range []string{"login", "node-add", "csrf-rejected", "forbidden", "alice", "victor", "没有被改动"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the audit page does not mention %q", want)
 		}

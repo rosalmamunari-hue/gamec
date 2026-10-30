@@ -1,5 +1,5 @@
 {{define "head"}}<!doctype html>
-<html lang="zh-Hant">
+<html lang="zh-Hans">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -12,18 +12,18 @@
   {{if .User}}
   <nav>
     <a href="/">渠道</a>
-    {{if .Admin}}<a href="/secrets">域名授權</a><a href="/ssh">伺服器管理</a><a href="/egress">出口代理</a>{{end}}
-    <a href="/audit">操作紀錄</a>
+    {{if .Admin}}<a href="/secrets">域名授权</a><a href="/ssh">服务器管理</a><a href="/egress">出口代理</a>{{end}}
+    <a href="/audit">操作记录</a>
     <form method="post" action="/logout">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <span class="who">{{.User}}{{if .Admin}}（管理員）{{else}}（唯讀）{{end}}</span>
-      <button class="link">登出</button>
+      <span class="who">{{.User}}{{if .Admin}}（管理员）{{else}}（只读）{{end}}</span>
+      <button class="link">注销</button>
     </form>
   </nav>
   {{end}}
 </header>
 <main>
-{{if .Sealed}}<div class="banner warn"><b>保險庫現在是上鎖的。</b>在解鎖之前，面板不能更新名單，自動續期也會暫停。{{if .Admin}} <a href="/unseal">馬上解鎖</a>{{end}}</div>{{end}}
+{{if .Sealed}}<div class="banner warn"><b>保险库现在是上锁的。</b>在解锁之前，面板不能更新名单，自动续期也会暂停。{{if .Admin}} <a href="/unseal">马上解锁</a>{{end}}</div>{{end}}
 {{if .Flash}}<div class="banner ok">{{.Flash}}</div>{{end}}
 {{if .Error}}<div class="banner err">{{.Error}}</div>{{end}}
 <h1>{{.Title}}</h1>

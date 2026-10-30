@@ -30,9 +30,9 @@ func cfProblem(err error) string {
 	case strings.Contains(m, "6003") || strings.Contains(m, "9109") || strings.Contains(m, "1000") ||
 		strings.Contains(m, "10000") || strings.Contains(m, "HTTP 401") || strings.Contains(m, "HTTP 403") ||
 		strings.Contains(strings.ToLower(m), "invalid"):
-		return "Cloudflare 不認這個令牌：可能沒有複製完整、已被撤銷，或權限不夠。請重新建立一個，權限選「區域 → DNS → 編輯」。"
+		return "Cloudflare 不认这个令牌：可能没有拷贝完整、已被撤销，或权限不够。请重新创建一个，权限选「区域 → DNS → 编辑」。"
 	case strings.Contains(m, "no such host") || strings.Contains(m, "timeout") || strings.Contains(m, "dial") || strings.Contains(m, "deadline"):
-		return "連不上 Cloudflare（網路問題），稍後再試一次。細節：" + m
+		return "连不上 Cloudflare（网络问题），稍后再试一次。细节：" + m
 	}
 	return m
 }
@@ -49,7 +49,7 @@ func (s *Server) checkToken(ctx context.Context, ref string) tokenResult {
 	res := tokenResult{Ref: ref}
 	tok, ok, err := s.Vault.Get("dns/" + ref + "/api_token")
 	if err != nil || !ok || tok == "" {
-		res.Message = "找不到名為「" + ref + "」的令牌，請先在上面貼上並儲存。"
+		res.Message = "找不到名为「" + ref + "」的令牌，请先在上面粘贴并保存。"
 		return res
 	}
 	cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
@@ -60,7 +60,7 @@ func (s *Server) checkToken(ctx context.Context, ref string) tokenResult {
 		return res
 	}
 	if len(zones) == 0 {
-		res.Message = "令牌有效，但它目前一個域名都管不了。建立令牌時請把你的域名加進「區域資源」。"
+		res.Message = "令牌有效，但它目前一个域名都管不了。创建令牌时请把你的域名加进「区域资源」。"
 		return res
 	}
 	res.OK, res.Zones = true, zones
@@ -70,7 +70,7 @@ func (s *Server) checkToken(ctx context.Context, ref string) tokenResult {
 // detectZone finds which of the token's domains a full name belongs to, so nobody has to type a zone or an id.
 func (s *Server) detectZone(ctx context.Context, ref, name string) (string, error) {
 	if s.Vault.Sealed() {
-		return "", fmt.Errorf("保險庫是上鎖狀態，請先解鎖，面板才能用令牌去查你的域名")
+		return "", fmt.Errorf("保险库是上锁状态，请先解锁，面板才能用令牌去查你的域名")
 	}
 	res := s.checkToken(ctx, ref)
 	if !res.OK {
@@ -83,7 +83,7 @@ func (s *Server) detectZone(ctx context.Context, ref, name string) (string, erro
 		}
 	}
 	if best == "" {
-		return "", fmt.Errorf("這個令牌管理的域名裡沒有「%s」所屬的那一個。它能管理：%s", name, strings.Join(res.Zones, "、"))
+		return "", fmt.Errorf("这个令牌管理的域名里没有「%s」所属的那一个。它能管理：%s", name, strings.Join(res.Zones, "、"))
 	}
 	return best, nil
 }
@@ -127,7 +127,7 @@ func (s *Server) renderSecrets(w http.ResponseWriter, r *http.Request, flash, er
 		}
 		sort.Slice(d.Creds, func(i, j int) bool { return d.Creds[i].Ref < d.Creds[j].Ref })
 	}
-	s.render(w, r, "secrets.html", page{Title: "域名授權", Flash: flash, Error: errMsg, Data: d}, status)
+	s.render(w, r, "secrets.html", page{Title: "域名授权", Flash: flash, Error: errMsg, Data: d}, status)
 }
 
 func (s *Server) secretsPage(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
@@ -140,11 +140,11 @@ func (s *Server) secretSet(w http.ResponseWriter, r *http.Request, _ *auth.Sessi
 		ref = "main"
 	}
 	if s.Vault.Sealed() {
-		s.renderSecrets(w, r, "", "保險庫是上鎖狀態，請先解鎖。", nil, http.StatusBadRequest)
+		s.renderSecrets(w, r, "", "保险库是上锁状态，请先解锁。", nil, http.StatusBadRequest)
 		return
 	}
 	if !credRefRe.MatchString(ref) || !credField[field] || value == "" || len(value) > 4096 {
-		s.renderSecrets(w, r, "", "名稱只能用小寫英文、數字、- 和 _；值不能是空的。", nil, http.StatusBadRequest)
+		s.renderSecrets(w, r, "", "名称只能用小写英文、数字、- 和 _；值不能是空的。", nil, http.StatusBadRequest)
 		return
 	}
 	if err := s.Vault.Set("dns/"+ref+"/"+field, value); err != nil {
@@ -156,23 +156,23 @@ func (s *Server) secretSet(w http.ResponseWriter, r *http.Request, _ *auth.Sessi
 		res := s.checkToken(r.Context(), ref)
 		s.log(r, "secret-test", fmt.Sprintf("dns/%s/api_token ok=%v", ref, res.OK), res.OK)
 		if res.OK {
-			s.renderSecrets(w, r, "已儲存，而且令牌可以用。", "", &res, http.StatusOK)
+			s.renderSecrets(w, r, "已保存，而且令牌可以用。", "", &res, http.StatusOK)
 		} else {
-			s.renderSecrets(w, r, "已儲存。", "但測試沒通過：令牌可能有問題，見下方說明。", &res, http.StatusOK)
+			s.renderSecrets(w, r, "已保存。", "但测试没通过：令牌可能有问题，见下方说明。", &res, http.StatusOK)
 		}
 		return
 	}
-	http.Redirect(w, r, "/secrets?ok="+url.QueryEscape("已儲存。這個值之後不會再顯示。"), http.StatusSeeOther)
+	http.Redirect(w, r, "/secrets?ok="+url.QueryEscape("已保存。这个值之后不会再显示。"), http.StatusSeeOther)
 }
 
 func (s *Server) secretTest(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
 	ref := strings.TrimSpace(r.FormValue("ref"))
 	if s.Vault.Sealed() {
-		s.renderSecrets(w, r, "", "保險庫是上鎖狀態，請先解鎖。", nil, http.StatusBadRequest)
+		s.renderSecrets(w, r, "", "保险库是上锁状态，请先解锁。", nil, http.StatusBadRequest)
 		return
 	}
 	if !credRefRe.MatchString(ref) {
-		s.renderSecrets(w, r, "", "名稱不正確。", nil, http.StatusBadRequest)
+		s.renderSecrets(w, r, "", "名称不正确。", nil, http.StatusBadRequest)
 		return
 	}
 	res := s.checkToken(r.Context(), ref)
@@ -223,17 +223,17 @@ func (s *Server) steps(st store.State, c *store.Cluster, row clusterRow) []step 
 		}
 	}
 	steps := []step{
-		{Done: !s.Vault.Sealed(), Title: "解鎖保險庫", Hint: "保險庫上鎖時，面板不能更新名單。每次面板重新啟動都要解鎖一次。", Href: "/unseal", Link: "去解鎖"},
+		{Done: !s.Vault.Sealed(), Title: "解锁保险库", Hint: "保险库上锁时，面板不能更新名单。每次面板重新启动都要解锁一次。", Href: "/unseal", Link: "去解锁"},
 	}
-	credHint := "到 Cloudflare 建一個只管你域名的令牌，貼進來，面板會馬上幫你測試。"
+	credHint := "到 Cloudflare 建一个只管你域名的令牌，贴进来，面板会马上帮你测试。"
 	if len(missing) > 0 && s.Vault.Sealed() == false {
-		credHint = "寫入位置用到的授權「" + strings.Join(missing, "、") + "」還沒儲存。" + credHint
+		credHint = "写入位置用到的授权「" + strings.Join(missing, "、") + "」还没保存。" + credHint
 	}
 	steps = append(steps,
-		step{Done: anyCred && len(missing) == 0, Title: "貼上 Cloudflare 令牌", Hint: credHint, Href: "/secrets", Link: "去貼令牌"},
-		step{Done: len(real) > 0, Title: "選好要寫入哪些域名", Hint: "名單會寫成這些域名下的一條記錄，App 靠它找到節點。", Href: "#targets", Link: "去設定"},
-		step{Done: row.All > 0, Title: "加入節點", Hint: fmt.Sprintf("目前 %d 個節點，其中 %d 個檢查正常。至少要有一個正常的節點。", row.All, row.OK), Href: "#nodes", Link: "去加入"},
-		step{Done: !c.Last.At.IsZero() && !c.Last.Manual && c.Last.Verified, Title: "把名單寫進域名", Hint: "面板簽好名單、寫進域名，再從外面讀一遍確認。之後它會自動續期。", Href: "#publish", Link: "去更新"},
+		step{Done: anyCred && len(missing) == 0, Title: "粘贴 Cloudflare 令牌", Hint: credHint, Href: "/secrets", Link: "去贴令牌"},
+		step{Done: len(real) > 0, Title: "选好要写入哪些域名", Hint: "名单会写成这些域名下的一条记录，App 靠它找到节点。", Href: "#targets", Link: "去设置"},
+		step{Done: row.All > 0, Title: "加入节点", Hint: fmt.Sprintf("目前 %d 个节点，其中 %d 个检查正常。至少要有一个正常的节点。", row.All, row.OK), Href: "#nodes", Link: "去加入"},
+		step{Done: !c.Last.At.IsZero() && !c.Last.Manual && c.Last.Verified, Title: "把名单写进域名", Hint: "面板签好名单、写进域名，再从外面读一遍确认。之后它会自动续期。", Href: "#publish", Link: "去更新"},
 	)
 	for i := range steps {
 		if strings.HasPrefix(steps[i].Href, "#") {

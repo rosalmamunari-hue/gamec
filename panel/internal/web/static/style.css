@@ -18,7 +18,7 @@
 html { -webkit-text-size-adjust:100%; }
 body {
   margin:0; background:var(--bg); color:var(--fg);
-  font:15px/1.65 system-ui,-apple-system,"Segoe UI","PingFang TC","Microsoft JhengHei","Noto Sans TC",sans-serif;
+  font:15px/1.65 system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif;
 }
 a { color:var(--accent); text-underline-offset:3px; }
 code, pre { font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
