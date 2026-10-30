@@ -1,0 +1,4 @@
+[
+  { "host": "203.0.113.10", "port": 30800, "pin": "base64-sha256-of-node-public-key=" },
+  { "host": "203.0.113.11", "port": 30800, "pin": "another-node-pin=", "enabled": false }
+]

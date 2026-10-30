@@ -69,9 +69,14 @@ func main() {
 	addr := flag.String("addr", "", "host:port")
 	pin := flag.String("pin", "", "expected key pin")
 	secret := flag.String("secret", "", "token secret")
+	given := flag.String("token", "", "use this token as the valid one (e.g. issued by the control service)")
 	flag.Parse()
 
-	c, rtt, err := dial(*addr, *pin, token(*secret, time.Now()))
+	valid := *given
+	if valid == "" {
+		valid = token(*secret, time.Now())
+	}
+	c, rtt, err := dial(*addr, *pin, valid)
 	if err != nil {
 		fmt.Println("FAIL connect/pin:", err)
 		os.Exit(1)

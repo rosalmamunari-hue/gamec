@@ -11,3 +11,8 @@ build/
 .gradle/
 .build/
 local.properties
+
+# Control service: real node list, signing key, ban list
+control/nodes.json
+control/*.key
+control/banned.txt
