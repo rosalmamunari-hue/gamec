@@ -1,6 +1,5 @@
 package com.gamec.shield
 
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.fail
 import org.junit.Assume.assumeTrue
@@ -22,36 +21,11 @@ class ShieldTest {
     private val port = 30800
     private val pin = System.getenv("GAMEC_TEST_PIN") ?: ""
     private val secret = System.getenv("GAMEC_TEST_SECRET") ?: ""
-    private var origin: ServerSocket? = null
 
     @Before
     fun setUp() {
         assumeTrue("GAMEC_TEST_PIN / GAMEC_TEST_SECRET not set", pin.isNotEmpty() && secret.isNotEmpty())
-        val ss = ServerSocket(9000, 50, InetAddress.getByName(host))
-        origin = ss
-        Thread {
-            while (!ss.isClosed) {
-                val c = try { ss.accept() } catch (_: Exception) { break }
-                Thread {
-                    try {
-                        val buf = ByteArray(4096)
-                        while (true) {
-                            val n = c.getInputStream().read(buf)
-                            if (n < 0) break
-                            c.getOutputStream().write(buf, 0, n)
-                        }
-                    } catch (_: Exception) {
-                    } finally {
-                        c.close()
-                    }
-                }.start()
-            }
-        }.also { it.isDaemon = true }.start()
-    }
-
-    @After
-    fun tearDown() {
-        origin?.close()
+        EchoOrigin.ensureStarted()
     }
 
     /** Same format the edge checks: "<uid>.<unix ts>.<hex hmac-sha256(secret, uid.ts)>" */
@@ -128,5 +102,35 @@ class ShieldTest {
         } finally {
             shield.stop()
         }
+    }
+}
+
+/** Echo server on 127.0.0.1:9000, started once and kept for the whole test JVM (rebinding per test races on the port). */
+private object EchoOrigin {
+    private var started = false
+
+    @Synchronized
+    fun ensureStarted() {
+        if (started) return
+        val ss = ServerSocket(9000, 50, InetAddress.getByName("127.0.0.1"))
+        Thread {
+            while (true) {
+                val c = try { ss.accept() } catch (_: Exception) { break }
+                Thread {
+                    try {
+                        val buf = ByteArray(4096)
+                        while (true) {
+                            val n = c.getInputStream().read(buf)
+                            if (n < 0) break
+                            c.getOutputStream().write(buf, 0, n)
+                        }
+                    } catch (_: Exception) {
+                    } finally {
+                        c.close()
+                    }
+                }.start()
+            }
+        }.also { it.isDaemon = true }.start()
+        started = true
     }
 }
