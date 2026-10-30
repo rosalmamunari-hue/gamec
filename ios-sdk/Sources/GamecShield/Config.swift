@@ -91,6 +91,26 @@ public struct DiscoveryConfig {
     }
 }
 
+/// Connection state for the game UI. Called on SDK background queues, never on the main thread; hop to the
+/// main queue yourself before touching UI. All methods have empty defaults.
+public protocol ShieldListener: AnyObject {
+    /// An upstream connection through `node` is established.
+    func shieldConnected(node: String)
+    /// Establishing one failed on every node; the SDK is retrying (attempt 1, 2, ...). The game's socket stays open.
+    func shieldRetrying(attempt: Int)
+    /// Gave up after `connectRetryWindow`; the game's socket is closed so it can retry itself.
+    func shieldConnectFailed()
+    /// An established connection was closed because the far side stopped answering.
+    func shieldConnectionLost(reason: String)
+}
+
+public extension ShieldListener {
+    func shieldConnected(node: String) {}
+    func shieldRetrying(attempt: Int) {}
+    func shieldConnectFailed() {}
+    func shieldConnectionLost(reason: String) {}
+}
+
 /// Pick one way to learn nodes and tokens:
 ///  - `discovery`: nodes from signed DNS TXT records, tokens from the nodes (no server of your own);
 ///  - `control`: nodes and tokens from your control service;
@@ -107,6 +127,16 @@ public struct ShieldConfig {
     public let connectTimeout: TimeInterval
     public let failCooldown: TimeInterval
     public let reprobeInterval: TimeInterval
+    /// When no node can be reached, keep retrying (backoff with jitter) for this long while the game's socket
+    /// stays open, so the game sees a slow connect instead of an immediate failure. 0 = fail at once.
+    public let connectRetryWindow: TimeInterval
+    public let retryMin: TimeInterval
+    public let retryMax: TimeInterval
+    /// Close a connection when the game has sent data and nothing at all came back for this long, so the game
+    /// notices a dead path in seconds instead of minutes and reconnects. 0 disables. Do not use it for
+    /// protocols where the client legitimately sends for a long time without ever getting a reply.
+    public let deadAfterUnanswered: TimeInterval
+    public let listener: ShieldListener?
 
     public init(nodes: [Node] = [],
                 tokenProvider: (() -> String)? = nil,
@@ -115,7 +145,12 @@ public struct ShieldConfig {
                 localPort: UInt16 = 0,
                 connectTimeout: TimeInterval = 3,
                 failCooldown: TimeInterval = 30,
-                reprobeInterval: TimeInterval = 60) {
+                reprobeInterval: TimeInterval = 60,
+                connectRetryWindow: TimeInterval = 15,
+                retryMin: TimeInterval = 0.2,
+                retryMax: TimeInterval = 3,
+                deadAfterUnanswered: TimeInterval = 20,
+                listener: ShieldListener? = nil) {
         precondition(discovery != nil || control != nil || (!nodes.isEmpty && tokenProvider != nil),
                      "provide discovery, control, or both nodes and tokenProvider")
         self.nodes = nodes
@@ -126,5 +161,10 @@ public struct ShieldConfig {
         self.connectTimeout = connectTimeout
         self.failCooldown = failCooldown
         self.reprobeInterval = reprobeInterval
+        self.connectRetryWindow = connectRetryWindow
+        self.retryMin = retryMin
+        self.retryMax = retryMax
+        self.deadAfterUnanswered = deadAfterUnanswered
+        self.listener = listener
     }
 }

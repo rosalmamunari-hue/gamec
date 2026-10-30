@@ -109,7 +109,7 @@ final class ShieldTests: XCTestCase {
         let wrong = P256.Signing.PrivateKey().publicKey.derRepresentation.base64EncodedString()
         let control = try ControlConfig(url: URL(string: env["GAMEC_TEST_CONTROL_URL"]!)!,
                                         publicKey: wrong, deviceId: "device-ios-e2e-000000002")
-        let shield = ShieldClient(config: ShieldConfig(control: control))
+        let shield = ShieldClient(config: ShieldConfig(control: control, connectRetryWindow: 0))
         let proxyPort = try shield.start()
         defer { shield.stop() }
         XCTAssertNil(echo(viaProxyPort: proxyPort, text: "ping"))
@@ -132,7 +132,7 @@ final class ShieldTests: XCTestCase {
         let wrong = P256.Signing.PrivateKey().publicKey.derRepresentation.base64EncodedString()
         let d = try DiscoveryConfig(name: "_gs.example.com", publicKey: wrong,
                                     deviceId: "device-ios-e2e-000000004", dohProviders: [env["GAMEC_TEST_DOH_URL"]!])
-        let shield = ShieldClient(config: ShieldConfig(discovery: d))
+        let shield = ShieldClient(config: ShieldConfig(discovery: d, connectRetryWindow: 0))
         let proxyPort = try shield.start()
         defer { shield.stop() }
         XCTAssertNil(echo(viaProxyPort: proxyPort, text: "ping"))
