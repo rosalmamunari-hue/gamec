@@ -175,7 +175,7 @@ class DeviceTest {
         val list = NodeDirectory(cfg).get()
         val dnsMs = (System.nanoTime() - t0) / 1_000_000
         assertTrue("no verified node list from real DNS", list != null && list.nodes.isNotEmpty())
-        android.util.Log.i("GamecLive", "DNS+verify: ${dnsMs}ms, nodes=${list!!.nodes}")
+        android.util.Log.i("GamecLive", "DNS+verify: ${dnsMs}ms via ${Resolvers.lastWinner}, nodes=${list!!.nodes}")
 
         val shield = ShieldClient(ShieldConfig(discovery = cfg))
         val p = shield.start()
