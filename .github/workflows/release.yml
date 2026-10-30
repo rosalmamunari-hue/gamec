@@ -1,0 +1,54 @@
+name: release
+
+# Tag a commit that has passed CI (git tag v0.1.0 && git push origin v0.1.0). This builds the Android AAR and
+# the node/tool binaries and attaches them to a GitHub release. iOS needs no file: Xcode adds the package by
+# repository URL and this tag.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+      - name: build the Android AAR
+        working-directory: android-sdk
+        run: gradle --no-daemon assembleRelease
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - name: build node and tools
+        working-directory: edge
+        run: |
+          mkdir -p ../dist
+          for target in linux/amd64 windows/amd64; do
+            os=${target%/*}; arch=${target#*/}; ext=""; [ "$os" = windows ] && ext=".exe"
+            for tool in . ./cmd/gencert ./cmd/signlist ./cmd/probe ./cmd/soak; do
+              name=$([ "$tool" = . ] && echo edge || basename "$tool")
+              GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -ldflags="-s -w" -o "../dist/${name}-${os}-${arch}${ext}" "$tool"
+            done
+          done
+          ls -l ../dist
+
+      - name: publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cp android-sdk/build/outputs/aar/*-release.aar "dist/gamec-shield-${TAG}.aar"
+          (cd dist && sha256sum * > SHA256SUMS.txt)
+          gh release create "$TAG" dist/* --title "$TAG" --generate-notes

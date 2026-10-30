@@ -14,7 +14,7 @@ workflows:
         script: swift --version
       - name: Build SDK
         script: |
-          cd ios-sdk
+          cd "$CM_BUILD_DIR"
           swift build
       - name: End-to-end test against a local edge node
         script: |
@@ -64,5 +64,5 @@ workflows:
           export GAMEC_TEST_LIVE_NAME=_gs.getnodepx.cfd
           sleep 2
 
-          cd "$CM_BUILD_DIR/ios-sdk"
+          cd "$CM_BUILD_DIR"
           swift test || { echo "--- edge log:"; cat /tmp/edge.log; echo "--- control log:"; cat /tmp/control.log; exit 1; }

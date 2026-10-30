@@ -20,7 +20,7 @@ and no server of your own is needed for discovery.
 | `edge/cmd/probe` | Checks one deployed node end to end |
 | `edge/cmd/soak` | Load and long-connection test (hold, burst, bulk) with a built-in echo origin |
 | `android-sdk/` | Android library (Kotlin, minSdk 29) |
-| `ios-sdk/` | iOS Swift package (iOS 15+) |
+| `ios-sdk/` | iOS sources (iOS 15+); the Swift package manifest is `Package.swift` at the repository root |
 | `control/` | Optional control service for tokens and node lists (not needed with DNS discovery) |
 
 ## How a connection is made
@@ -66,6 +66,23 @@ Check what the world sees: `go run ./cmd/signlist -check _gs.example.com -pub <p
   means a new key and a new app release.
 * The list **expires** (`-valid-days`). Sign and publish again before that, or apps will find no nodes.
 * Apps never accept an older list than one they have already seen.
+
+## Adding the SDK to a game
+
+Each tagged version (`vX.Y.Z`) has a release page with the Android AAR and the node/tool binaries.
+
+**Android**: download `gamec-shield-vX.Y.Z.aar`, put it in `app/libs/`, and in `app/build.gradle.kts`:
+
+```kotlin
+dependencies { implementation(files("libs/gamec-shield-vX.Y.Z.aar")) }
+```
+
+The library has no other dependencies (it needs the Kotlin standard library, which a Kotlin app already has)
+and declares the `INTERNET` permission itself.
+
+**iOS**: in Xcode choose *File > Add Package Dependencies*, enter this repository's URL, pick the version, and
+add the `GamecShield` library to the game target. Or in `Package.swift`:
+`.package(url: "<this repository's URL>", from: "X.Y.Z")`.
 
 ## Using the SDK
 

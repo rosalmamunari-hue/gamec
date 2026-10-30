@@ -1,4 +1,6 @@
 // swift-tools-version:5.7
+// Lives at the repository root so the SDK can be added in Xcode by repository URL and version tag.
+// The sources are in ios-sdk/.
 import PackageDescription
 
 let package = Package(
@@ -7,7 +9,7 @@ let package = Package(
     platforms: [.iOS(.v15), .macOS(.v12)],
     products: [.library(name: "GamecShield", targets: ["GamecShield"])],
     targets: [
-        .target(name: "GamecShield"),
-        .testTarget(name: "GamecShieldTests", dependencies: ["GamecShield"]),
+        .target(name: "GamecShield", path: "ios-sdk/Sources/GamecShield"),
+        .testTarget(name: "GamecShieldTests", dependencies: ["GamecShield"], path: "ios-sdk/Tests/GamecShieldTests"),
     ]
 )
