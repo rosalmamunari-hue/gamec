@@ -10,6 +10,7 @@ import Network
 public final class ShieldClient {
     private let cfg: ShieldConfig
     private let selector: NodeSelector
+    private let sessions: SessionManager?
     private let queue = DispatchQueue(label: "gamec.shield")
     private var listener: NWListener?
     private var probeTimer: DispatchSourceTimer?
@@ -17,6 +18,15 @@ public final class ShieldClient {
     public init(config: ShieldConfig) {
         cfg = config
         selector = NodeSelector(nodes: config.nodes, cooldown: config.failCooldown)
+        sessions = config.control.map { SessionManager(cfg: $0) }
+    }
+
+    /// Refreshes the session (blocking, so never on the shield queue) and re-measures every node.
+    private func refreshAndProbe() {
+        DispatchQueue.global().async { [self] in
+            if let s = sessions?.get() { selector.update(s.nodes) }
+            selector.probeAll(timeout: cfg.connectTimeout, queue: queue)
+        }
     }
 
     /// Starts the loopback listener and returns the local port.
@@ -41,13 +51,10 @@ public final class ShieldClient {
         guard let port = l.port?.rawValue else { throw NWError.posix(.EADDRNOTAVAIL) }
         listener = l
 
-        selector.probeAll(timeout: cfg.connectTimeout, queue: queue)
+        refreshAndProbe()
         let t = DispatchSource.makeTimerSource(queue: queue)
         t.schedule(deadline: .now() + cfg.reprobeInterval, repeating: cfg.reprobeInterval)
-        t.setEventHandler { [weak self] in
-            guard let self = self else { return }
-            self.selector.probeAll(timeout: self.cfg.connectTimeout, queue: self.queue)
-        }
+        t.setEventHandler { [weak self] in self?.refreshAndProbe() }
         t.resume()
         probeTimer = t
         return port
@@ -60,9 +67,19 @@ public final class ShieldClient {
 
     private func accept(_ local: NWConnection) {
         local.start(queue: queue)
-        // tokenProvider may block briefly, so keep it off the shield queue.
+        // Fetching a session or calling tokenProvider may block, so keep it off the shield queue.
         DispatchQueue.global().async { [self] in
-            let token = Data(cfg.tokenProvider().utf8)
+            let token: Data
+            if let sessions = sessions {
+                guard let s = sessions.get() else {
+                    queue.async { local.cancel() }
+                    return
+                }
+                selector.update(s.nodes)
+                token = Data(s.token.utf8)
+            } else {
+                token = Data(cfg.tokenProvider!().utf8)
+            }
             queue.async { self.openUpstream(nodes: self.selector.ordered(), token: token, local: local) }
         }
     }

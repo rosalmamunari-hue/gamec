@@ -90,6 +90,31 @@ final class ShieldTests: XCTestCase {
         XCTAssertNil(echo(viaProxyPort: proxyPort, text: "ping"))
     }
 
+    func testControlModeFetchesTokenAndNodesAutomatically() throws {
+        let env = ProcessInfo.processInfo.environment
+        try XCTSkipIf(env["GAMEC_TEST_CONTROL_URL"] == nil || env["GAMEC_TEST_CONTROL_PUBKEY"] == nil,
+                      "control env not set")
+        let control = try ControlConfig(url: URL(string: env["GAMEC_TEST_CONTROL_URL"]!)!,
+                                        publicKey: env["GAMEC_TEST_CONTROL_PUBKEY"]!,
+                                        deviceId: "device-ios-e2e-000000001")
+        let shield = ShieldClient(config: ShieldConfig(control: control))
+        let proxyPort = try shield.start()
+        defer { shield.stop() }
+        XCTAssertEqual(echo(viaProxyPort: proxyPort, text: "ping"), "ping")
+    }
+
+    func testControlModeRefusesAServiceSignedByTheWrongKey() throws {
+        let env = ProcessInfo.processInfo.environment
+        try XCTSkipIf(env["GAMEC_TEST_CONTROL_URL"] == nil, "control env not set")
+        let wrong = P256.Signing.PrivateKey().publicKey.derRepresentation.base64EncodedString()
+        let control = try ControlConfig(url: URL(string: env["GAMEC_TEST_CONTROL_URL"]!)!,
+                                        publicKey: wrong, deviceId: "device-ios-e2e-000000002")
+        let shield = ShieldClient(config: ShieldConfig(control: control))
+        let proxyPort = try shield.start()
+        defer { shield.stop() }
+        XCTAssertNil(echo(viaProxyPort: proxyPort, text: "ping"))
+    }
+
     func testFailoverSkipsDeadNode() throws {
         try XCTSkipIf(secret.isEmpty, "GAMEC_TEST_SECRET not set")
         let dead = Node(host: host, port: 1, pinSha256: pin)

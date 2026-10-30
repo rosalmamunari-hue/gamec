@@ -43,7 +43,17 @@ workflows:
           python3 /tmp/echo.py &
           /tmp/edge -listen 127.0.0.1:30800 -origin 127.0.0.1:9000 \
             -cert /tmp/certs/cert.pem -key /tmp/certs/key.pem -secret "$GAMEC_TEST_SECRET" > /tmp/edge.log 2>&1 &
+
+          # control service in front of that node
+          cd "$CM_BUILD_DIR/control"
+          go build -o /tmp/control .
+          echo "$GAMEC_TEST_SECRET" > /tmp/secret.txt
+          export GAMEC_TEST_CONTROL_PUBKEY=$(/tmp/control -gen-key /tmp/sign.key | grep '^public key' | awk '{print $NF}')
+          echo "[{\"host\":\"127.0.0.1\",\"port\":30800,\"pin\":\"$GAMEC_TEST_PIN\"}]" > /tmp/nodes.json
+          /tmp/control -listen 127.0.0.1:8099 -nodes /tmp/nodes.json -secret-file /tmp/secret.txt \
+            -sign-key /tmp/sign.key > /tmp/control.log 2>&1 &
+          export GAMEC_TEST_CONTROL_URL=http://127.0.0.1:8099/v1/session
           sleep 2
 
           cd "$CM_BUILD_DIR/ios-sdk"
-          swift test || { echo "--- edge log:"; cat /tmp/edge.log; exit 1; }
+          swift test || { echo "--- edge log:"; cat /tmp/edge.log; echo "--- control log:"; cat /tmp/control.log; exit 1; }
