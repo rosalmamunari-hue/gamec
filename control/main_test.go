@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
-	"crypto/ed25519"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -19,7 +21,7 @@ const goodID = "device-1234567890abcdef"
 
 type fixture struct {
 	srv    *httptest.Server
-	pub    ed25519.PublicKey
+	pub    *ecdsa.PublicKey
 	secret []byte
 	dir    string
 }
@@ -31,7 +33,7 @@ func newFixture(t *testing.T, nodesJSON string, ipMax, devMax int) *fixture {
 	if err := os.WriteFile(nodes, []byte(nodesJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	s := &Server{
 		secret:     []byte("test-secret"),
 		signKey:    priv,
@@ -42,7 +44,7 @@ func newFixture(t *testing.T, nodesJSON string, ipMax, devMax int) *fixture {
 	}
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
-	return &fixture{srv: ts, pub: pub, secret: s.secret, dir: dir}
+	return &fixture{srv: ts, pub: &priv.PublicKey, secret: s.secret, dir: dir}
 }
 
 func (f *fixture) post(id string) *http.Response {
@@ -71,7 +73,7 @@ func TestSessionIsSignedAndTokenMatchesEdgeFormat(t *testing.T) {
 	json.NewDecoder(resp.Body).Decode(&env)
 	raw, _ := base64.StdEncoding.DecodeString(env.Payload)
 	sig, _ := base64.StdEncoding.DecodeString(env.Sig)
-	if !ed25519.Verify(f.pub, raw, sig) {
+	if !verify(f.pub, raw, sig) {
 		t.Fatal("signature does not verify")
 	}
 	var p Payload
@@ -92,6 +94,11 @@ func TestSessionIsSignedAndTokenMatchesEdgeFormat(t *testing.T) {
 	}
 }
 
+func verify(pub *ecdsa.PublicKey, msg, sig []byte) bool {
+	h := sha256.Sum256(msg)
+	return ecdsa.VerifyASN1(pub, h[:], sig)
+}
+
 func atoi(s string) int64 {
 	var n int64
 	for _, c := range s {
@@ -109,7 +116,7 @@ func TestTamperedPayloadFailsVerification(t *testing.T) {
 	raw, _ := base64.StdEncoding.DecodeString(env.Payload)
 	raw = bytes.Replace(raw, []byte("pinA"), []byte("pinX"), 1)
 	sig, _ := base64.StdEncoding.DecodeString(env.Sig)
-	if ed25519.Verify(f.pub, raw, sig) {
+	if verify(f.pub, raw, sig) {
 		t.Fatal("a modified node list must not verify")
 	}
 }

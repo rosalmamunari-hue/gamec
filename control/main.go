@@ -1,6 +1,6 @@
 // Control service: hands a device a short-lived edge token plus the current node list.
 //
-// The response is signed with Ed25519. Apps embed only the signing PUBLIC key and refuse any node
+// The response is signed with ECDSA P-256 (supported natively on Android, iOS and Go). Apps embed only the signing PUBLIC key and refuse any node
 // list whose signature does not verify, so a hijacked connection cannot steer players to fake nodes.
 //
 // Identity model (device-id version): the app generates a random id once and sends it. That proves
@@ -8,10 +8,12 @@
 package main
 
 import (
-	"crypto/ed25519"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -53,7 +55,7 @@ type Payload struct {
 
 type Envelope struct {
 	Payload string `json:"payload"` // base64 of the JSON Payload (exact bytes that were signed)
-	Sig     string `json:"sig"`     // base64 Ed25519 signature over those bytes
+	Sig     string `json:"sig"`     // base64 ASN.1/DER ECDSA-P256 signature over SHA-256(those bytes)
 }
 
 // MakeToken must match the edge node: "<uid>.<unix ts>.<hex hmac-sha256(secret, uid.ts)>".
@@ -90,7 +92,7 @@ func (w *window) allow(key string, now time.Time) bool {
 
 type Server struct {
 	secret     []byte
-	signKey    ed25519.PrivateKey
+	signKey    *ecdsa.PrivateKey
 	nodesPath  string
 	bannedPath string
 	ipLimit    *window
@@ -194,9 +196,15 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		IssuedAt:  now.Unix(),
 		ExpiresAt: now.Add(tokenLifetime).Unix(),
 	})
+	digest := sha256.Sum256(pl)
+	sig, err := ecdsa.SignASN1(rand.Reader, s.signKey, digest[:])
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	env := Envelope{
 		Payload: base64.StdEncoding.EncodeToString(pl),
-		Sig:     base64.StdEncoding.EncodeToString(ed25519.Sign(s.signKey, pl)),
+		Sig:     base64.StdEncoding.EncodeToString(sig),
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -210,27 +218,37 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-func loadSignKey(path string) (ed25519.PrivateKey, error) {
+// The signing key file holds base64(DER SEC1 EC private key).
+func loadSignKey(path string) (*ecdsa.PrivateKey, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	seed, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(b)))
-	if err != nil || len(seed) != ed25519.SeedSize {
-		return nil, errors.New("sign key must be a base64-encoded 32-byte seed")
+	der, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(b)))
+	if err != nil {
+		return nil, errors.New("sign key must be base64")
 	}
-	return ed25519.NewKeyFromSeed(seed), nil
+	k, err := x509.ParseECPrivateKey(der)
+	if err != nil || k.Curve != elliptic.P256() {
+		return nil, errors.New("sign key must be a P-256 EC private key")
+	}
+	return k, nil
 }
 
 func genKey(path string) {
 	if _, err := os.Stat(path); err == nil {
 		log.Fatalf("%s already exists; refusing to overwrite (the app embeds the matching public key)", path)
 	}
-	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
-	if err := os.WriteFile(path, []byte(base64.StdEncoding.EncodeToString(priv.Seed())+"\n"), 0o600); err != nil {
+	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println("private seed written to", path, "(keep secret, never ship in the app)")
+	der, _ := x509.MarshalECPrivateKey(k)
+	if err := os.WriteFile(path, []byte(base64.StdEncoding.EncodeToString(der)+"\n"), 0o600); err != nil {
+		log.Fatal(err)
+	}
+	pub, _ := x509.MarshalPKIXPublicKey(&k.PublicKey)
+	fmt.Println("private key written to", path, "(keep secret, never ship in the app)")
 	fmt.Println("public key (embed in the app):", base64.StdEncoding.EncodeToString(pub))
 }
 
@@ -239,7 +257,7 @@ func main() {
 		listen     = flag.String("listen", ":8080", "listen address")
 		nodesPath  = flag.String("nodes", "nodes.json", "node list file")
 		secretFile = flag.String("secret-file", "", "file holding the edge token secret")
-		keyFile    = flag.String("sign-key", "", "Ed25519 signing key file")
+		keyFile    = flag.String("sign-key", "", "ECDSA P-256 signing key file")
 		bannedPath = flag.String("banned", "", "optional file of banned device ids, one per line")
 		cert       = flag.String("cert", "", "TLS cert (PEM); empty = plain HTTP")
 		key        = flag.String("key", "", "TLS key (PEM)")

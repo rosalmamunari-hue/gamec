@@ -19,4 +19,6 @@ android {
 
 dependencies {
     testImplementation("junit:junit:4.13.2")
+    // android.jar's org.json is a stub in JVM unit tests; use the real implementation there.
+    testImplementation("org.json:json:20240303")
 }

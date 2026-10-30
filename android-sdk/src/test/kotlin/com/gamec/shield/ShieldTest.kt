@@ -93,6 +93,36 @@ class ShieldTest {
     }
 
     @Test
+    fun controlModeFetchesTokenAndNodesAutomatically() {
+        val url = System.getenv("GAMEC_TEST_CONTROL_URL")
+        val key = System.getenv("GAMEC_TEST_CONTROL_PUBKEY")
+        assumeTrue("control env not set", !url.isNullOrEmpty() && !key.isNullOrEmpty())
+        val shield = ShieldClient(ShieldConfig(control = ControlConfig(url!!, key!!, "device-android-e2e-0001")))
+        val p = shield.start()
+        try {
+            assertEquals("ping", pingVia(p))
+        } finally {
+            shield.stop()
+        }
+    }
+
+    @Test
+    fun controlModeRefusesAServiceSignedByTheWrongKey() {
+        val url = System.getenv("GAMEC_TEST_CONTROL_URL")
+        assumeTrue("control env not set", !url.isNullOrEmpty())
+        val other = java.security.KeyPairGenerator.getInstance("EC")
+            .apply { initialize(java.security.spec.ECGenParameterSpec("secp256r1")) }.generateKeyPair()
+        val wrongKey = java.util.Base64.getEncoder().encodeToString(other.public.encoded)
+        val shield = ShieldClient(ShieldConfig(control = ControlConfig(url!!, wrongKey, "device-android-e2e-0002")))
+        val p = shield.start()
+        try {
+            assertEquals(null, pingVia(p))
+        } finally {
+            shield.stop()
+        }
+    }
+
+    @Test
     fun failoverSkipsDeadNode() {
         val dead = Node(host, 1, pin)
         val shield = ShieldClient(ShieldConfig(listOf(dead, goodNode()), { token(secret) }))

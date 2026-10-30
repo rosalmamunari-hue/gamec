@@ -2,10 +2,18 @@ package com.gamec.shield
 
 import java.util.concurrent.ConcurrentHashMap
 
-/** Tracks measured latency per node and temporarily benches nodes that fail. */
-internal class NodeSelector(private val nodes: List<Node>, private val cooldownMs: Long) {
+/** Tracks measured latency per node and temporarily benches nodes that fail. The node set can change at runtime. */
+internal class NodeSelector(initial: List<Node>, private val cooldownMs: Long) {
+    @Volatile private var nodes: List<Node> = initial
     private val rtt = ConcurrentHashMap<Node, Long>()
     private val benchedUntil = ConcurrentHashMap<Node, Long>()
+
+    fun update(newNodes: List<Node>) {
+        if (newNodes == nodes) return
+        nodes = newNodes
+        rtt.keys.retainAll(newNodes.toSet())
+        benchedUntil.keys.retainAll(newNodes.toSet())
+    }
 
     fun recordRtt(n: Node, ms: Long) {
         rtt[n] = ms
