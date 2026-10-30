@@ -67,6 +67,8 @@ Check what the world sees: `go run ./cmd/signlist -check _gs.example.com -pub <p
 * The list **expires** (`-valid-days`). Sign and publish again before that, or apps will find no nodes.
 * Apps never accept an older list than one they have already seen.
 
+Step-by-step guide for an Android developer (in Chinese): [docs/ANDROID_INTEGRATION.md](docs/ANDROID_INTEGRATION.md).
+
 ## Adding the SDK to a game
 
 Each tagged version (`vX.Y.Z`) has a release page with the Android AAR and the node/tool binaries.
