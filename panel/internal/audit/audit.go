@@ -10,9 +10,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"time"
+
+	"gamec/panel/internal/flock"
 )
 
 type Entry struct {
@@ -38,6 +41,7 @@ type Log struct {
 	mu   sync.Mutex
 	path string
 	last string
+	size int64 // file size after our last append; more means another process (a panel command) appended
 }
 
 // Open continues an existing log, or starts one. A log whose chain is already broken is refused so that
@@ -50,6 +54,9 @@ func Open(path string) (*Log, error) {
 			return nil, fmt.Errorf("audit log is damaged: %w", err)
 		}
 		l.last = last
+		if fi, err := os.Stat(path); err == nil {
+			l.size = fi.Size()
+		}
 	}
 	return l, nil
 }
@@ -60,25 +67,61 @@ func (l *Log) Append(e Entry) error {
 	if e.Time.IsZero() {
 		e.Time = time.Now().UTC()
 	}
-	e.Prev = l.last
-	e.Hash = sum(l.last, e)
-	b, err := json.Marshal(e)
-	if err != nil {
-		return err
-	}
-	f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	// The server and the command-line tools both append; the lock and the catch-up keep one chain.
+	f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	if _, err := f.Write(append(b, '\n')); err != nil {
+	if err := flock.Lock(f); err != nil {
+		return err
+	}
+	last, size, err := catchUp(f, l.last, l.size)
+	if err != nil {
+		return fmt.Errorf("audit log: %w", err)
+	}
+	e.Prev = last
+	e.Hash = sum(last, e)
+	b, err := json.Marshal(e)
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n')
+	if _, err := f.Write(b); err != nil {
 		return err
 	}
 	if err := f.Sync(); err != nil {
 		return err
 	}
-	l.last = e.Hash
+	l.last, l.size = e.Hash, size+int64(len(b))
 	return nil
+}
+
+// catchUp checks the entries appended after offset by someone else and returns the newest hash and the size.
+func catchUp(f *os.File, last string, offset int64) (string, int64, error) {
+	fi, err := f.Stat()
+	if err != nil {
+		return "", 0, err
+	}
+	if fi.Size() == offset {
+		return last, offset, nil
+	}
+	if fi.Size() < offset {
+		return "", 0, errors.New("the file got shorter: entries were removed")
+	}
+	sc := bufio.NewScanner(io.NewSectionReader(f, offset, fi.Size()-offset))
+	sc.Buffer(make([]byte, 1<<20), 1<<20)
+	for sc.Scan() {
+		var e Entry
+		if err := json.Unmarshal(sc.Bytes(), &e); err != nil {
+			return "", 0, fmt.Errorf("an entry added by another process is not valid: %w", err)
+		}
+		if e.Prev != last || sum(last, e) != e.Hash {
+			return "", 0, errors.New("an entry added by another process does not continue the chain")
+		}
+		last = e.Hash
+	}
+	return last, fi.Size(), sc.Err()
 }
 
 func verify(path string) (n int, last string, err error) {

@@ -305,7 +305,10 @@ func (o *Ops) Upgrade(ctx context.Context, n store.Node, b Binary) (UpgradeResul
 
 	probe, ok := o.waitHealthy(ctx, n)
 	if !ok {
-		if _, rerr := call(ctx, r, unit, "rollback"); rerr != nil {
+		// The checks also stop when the caller gives up; going back must happen anyway.
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+		defer cancel()
+		if _, rerr := call(rctx, r, unit, "rollback"); rerr != nil {
 			res.Detail = fmt.Sprintf("the new version never passed the checks (%s) and going back failed: %v", probe.Err, rerr)
 			return res, errors.New(res.Detail)
 		}

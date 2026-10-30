@@ -216,7 +216,10 @@ func (u *Users) Add(name string, role Role, password string, now time.Time) (str
 }
 
 // Authenticate checks password and TOTP code together. Every failure returns ErrInvalid (or ErrLocked once
-// the account is locked); five failures lock the account for 15 minutes.
+// the account is locked); five failures lock the account for 15 minutes. A locked account still lets in the
+// right password with a fresh code: otherwise anyone who knows the name could keep the admins out (and the
+// vault sealed) with five bad tries every 15 minutes. A wrong guess while locked is refused as before, and
+// learns nothing, because password and code are only ever judged together.
 func (u *Users) Authenticate(name, password, code string, now time.Time) (*User, error) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -225,12 +228,12 @@ func (u *Users) Authenticate(name, password, code string, now time.Time) (*User,
 		CheckPassword(dummyHash, password)
 		return nil, ErrInvalid
 	}
-	if now.Before(usr.LockedUntil) {
-		return nil, ErrLocked
-	}
 	pwOK := CheckPassword(usr.PwHash, password)
 	step, codeOK := VerifyTOTP(usr.TOTP, code, now)
 	replay := codeOK && step <= usr.LastStep // a code may be used once
+	if now.Before(usr.LockedUntil) && !(pwOK && codeOK && !replay) {
+		return nil, ErrLocked
+	}
 	if !pwOK || !codeOK || replay {
 		usr.Failed++
 		if usr.Failed >= MaxFailures {
@@ -241,6 +244,7 @@ func (u *Users) Authenticate(name, password, code string, now time.Time) (*User,
 		return nil, ErrInvalid
 	}
 	usr.Failed = 0
+	usr.LockedUntil = time.Time{}
 	usr.LastStep = step
 	u.save()
 	cp := *usr

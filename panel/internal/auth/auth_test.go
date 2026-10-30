@@ -122,13 +122,27 @@ func TestLockoutAfterRepeatedFailures(t *testing.T) {
 	for i := 0; i < MaxFailures; i++ {
 		u.Authenticate("alice", "wrong password!!", "000000", now)
 	}
-	// even the right credentials are refused while locked
-	if _, err := u.Authenticate("alice", goodPW, code(t, sec, now), now); err != ErrLocked {
+	// guesses are refused while locked, even a right password with a wrong code
+	if _, err := u.Authenticate("alice", goodPW, "000000", now); err != ErrLocked {
 		t.Fatalf("expected lockout, got %v", err)
 	}
 	after := now.Add(LockDuration + time.Second)
 	if _, err := u.Authenticate("alice", goodPW, code(t, sec, after), after); err != nil {
 		t.Fatalf("lock should expire: %v", err)
+	}
+}
+
+// Someone who only knows the name must not be able to keep the real admin out.
+func TestTheRealAdminGetsInDespiteALockout(t *testing.T) {
+	u, sec, now := newUsers(t)
+	for i := 0; i < MaxFailures; i++ {
+		u.Authenticate("alice", "wrong password!!", "000000", now)
+	}
+	if _, err := u.Authenticate("alice", goodPW, code(t, sec, now), now); err != nil {
+		t.Fatalf("right password and code while locked: %v", err)
+	}
+	if _, err := u.Authenticate("alice", "wrong password!!", "000000", now); err != ErrInvalid {
+		t.Fatalf("a success clears the lock, so the next failure is an ordinary one: %v", err)
 	}
 }
 

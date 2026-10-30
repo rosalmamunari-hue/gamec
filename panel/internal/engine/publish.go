@@ -66,6 +66,9 @@ type Publisher struct {
 	locks sync.Map
 }
 
+// WriteTimeout bounds the DNS changes for one target; they run to the end even if the caller gives up.
+var WriteTimeout = 2 * time.Minute
+
 func (p *Publisher) now() time.Time {
 	if p.Now != nil {
 		return p.Now()
@@ -163,34 +166,51 @@ func (p *Publisher) Publish(ctx context.Context, clusterID string, nodes []*stor
 	}
 	res.Nodes, res.Records, res.Iat, res.Exp = nodeLabels(nodes), recs, now.Unix(), now.Add(valid).Unix()
 
+	// Writing is not tied to the caller: a browser that goes away (or the request timeout) must not stop a
+	// provider halfway, between deleting the old records and adding the new ones. Read-back comes after every
+	// target is written, so a slow check at one target cannot eat the time another needs to be written.
 	res.OK = true
-	for _, t := range c.Targets {
+	written := make([]bool, len(c.Targets))
+	for i, t := range c.Targets {
 		tr := TargetResult{Target: t}
 		prov, err := p.Provider(t)
 		if err != nil {
 			tr.Err = err.Error()
-		} else if err := prov.ReplaceTXT(ctx, t.Zone, t.Name, recs); errors.Is(err, dns.ErrManual) {
-			tr.Manual = true
-			res.Manual = true
-		} else if err != nil {
-			tr.Err = err.Error()
-		} else if p.Verifier != nil {
-			var verr error
-			if sv, ok := p.Verifier.(SealedVerifier); ok && opts.SealKey != nil {
-				verr = sv.VerifySealed(ctx, t.Name, &key.PublicKey, res.Iat, opts.SealKey)
-			} else {
-				verr = p.Verifier.Verify(ctx, t.Name, &key.PublicKey, res.Iat)
-			}
-			if verr != nil {
-				tr.VerifyErr = verr.Error()
-			} else {
-				tr.Verified = true
+		} else {
+			wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), WriteTimeout)
+			err := prov.ReplaceTXT(wctx, t.Zone, t.Name, recs)
+			cancel()
+			switch {
+			case errors.Is(err, dns.ErrManual):
+				tr.Manual = true
+				res.Manual = true
+			case err != nil:
+				tr.Err = err.Error()
+			default:
+				written[i] = true
 			}
 		}
 		if tr.Err != "" {
 			res.OK = false
 		}
 		res.Targets = append(res.Targets, tr)
+	}
+	for i := range res.Targets {
+		tr := &res.Targets[i]
+		if !written[i] || p.Verifier == nil {
+			continue
+		}
+		var verr error
+		if sv, ok := p.Verifier.(SealedVerifier); ok && opts.SealKey != nil {
+			verr = sv.VerifySealed(ctx, tr.Target.Name, &key.PublicKey, res.Iat, opts.SealKey)
+		} else {
+			verr = p.Verifier.Verify(ctx, tr.Target.Name, &key.PublicKey, res.Iat)
+		}
+		if verr != nil {
+			tr.VerifyErr = verr.Error()
+		} else {
+			tr.Verified = true
+		}
 	}
 
 	// The cluster's record of "what is published" only moves forward when nothing failed, so a half-done

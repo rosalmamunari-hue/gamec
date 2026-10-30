@@ -25,6 +25,7 @@ import (
 	"gamec/panel/internal/dns"
 	"gamec/panel/internal/egress"
 	"gamec/panel/internal/engine"
+	"gamec/panel/internal/flock"
 	"gamec/panel/internal/ops"
 	"gamec/panel/internal/sshx"
 	"gamec/panel/internal/store"
@@ -83,6 +84,26 @@ func dataFlag(fs *flag.FlagSet) *string {
 func pathsOf(dir string) paths {
 	return paths{dir, filepath.Join(dir, "vault.json"), filepath.Join(dir, "users.json"),
 		filepath.Join(dir, "state.json"), filepath.Join(dir, "audit.log")}
+}
+
+// dataLock is held for the life of the process by the server and by every command that changes the data
+// files: each keeps those files in memory and rewrites them whole, so two at once would undo each other.
+var dataLock *os.File
+
+func lockData(dir string) error {
+	f, err := os.OpenFile(filepath.Join(dir, "panel.lock"), os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return err
+	}
+	if err := flock.TryLock(f); err != nil {
+		f.Close()
+		if errors.Is(err, flock.ErrBusy) {
+			return errors.New("the panel (or another panel command) is using this data directory: make the change in the web page, or stop the service first")
+		}
+		return err
+	}
+	dataLock = f
+	return nil
 }
 
 // one reader for the whole process: a fresh one per prompt would swallow input that was piped in
@@ -154,6 +175,9 @@ func cmdInit(args []string) error {
 	if err := os.MkdirAll(p.dir, 0o700); err != nil {
 		return err
 	}
+	if err := lockData(p.dir); err != nil {
+		return err
+	}
 	fmt.Fprintln(os.Stderr, "The vault passphrase protects every signing key and credential. It is never stored.")
 	fmt.Fprintln(os.Stderr, "Write it down somewhere safe: if it is lost the vault cannot be opened and the keys are gone.")
 	pw, err := confirmed("New vault passphrase (12+ characters): ")
@@ -176,6 +200,9 @@ func cmdAddUser(args []string) error {
 	fs.Parse(args)
 	p := pathsOf(*data)
 	if err := os.MkdirAll(p.dir, 0o700); err != nil {
+		return err
+	}
+	if err := lockData(p.dir); err != nil {
 		return err
 	}
 	users, err := auth.OpenUsers(p.users)
@@ -213,6 +240,9 @@ func cmdImportCluster(args []string) error {
 	renew := fs.Int("renew-days", 10, "renew this many days before expiry")
 	fs.Parse(args)
 	p := pathsOf(*data)
+	if err := lockData(p.dir); err != nil {
+		return err
+	}
 
 	rawKey, err := os.ReadFile(*keyFile)
 	if err != nil {
@@ -262,6 +292,9 @@ func cmdSSHKeygen(args []string) error {
 	force := fs.Bool("force", false, "replace the existing key (every node must then be given the new public key)")
 	fs.Parse(args)
 	p := pathsOf(*data)
+	if err := lockData(p.dir); err != nil {
+		return err
+	}
 	v, err := openVault(p)
 	if err != nil {
 		return err
@@ -298,6 +331,9 @@ func cmdSetSecret(args []string) error {
 	fs.Parse(args)
 	if *name == "" {
 		return errors.New("-name is required")
+	}
+	if err := lockData(*data); err != nil {
+		return err
 	}
 	v, err := openVault(pathsOf(*data))
 	if err != nil {
@@ -365,6 +401,9 @@ func cmdServe(args []string) error {
 	autoUnseal := fs.Bool("unseal-at-start", false, "unseal with $PANEL_PASSPHRASE_FILE at start (otherwise unseal in the browser)")
 	fs.Parse(args)
 	p := pathsOf(*data)
+	if err := lockData(p.dir); err != nil {
+		return err
+	}
 
 	v, err := vault.Open(p.vault)
 	if err != nil {

@@ -43,6 +43,7 @@ type fakeNode struct {
 	failOpen    error
 	opens       int
 	rolledBack  bool
+	onInstall   func() // runs once the new version is installed
 }
 
 func (f *fakeNode) Open(context.Context, store.Node) (Runner, error) {
@@ -56,9 +57,12 @@ func (f *fakeNode) Open(context.Context, store.Node) (Runner, error) {
 }
 func (f *fakeNode) Close() error { return nil }
 
-func (f *fakeNode) Run(_ context.Context, cmd string, stdin io.Reader) (sshx.Result, error) {
+func (f *fakeNode) Run(ctx context.Context, cmd string, stdin io.Reader) (sshx.Result, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := ctx.Err(); err != nil { // like sshx: a cancelled context runs nothing
+		return sshx.Result{}, err
+	}
 	f.cmds = append(f.cmds, cmd)
 	switch {
 	case strings.HasPrefix(cmd, "cat > "+StagingDir+"/"):
@@ -78,6 +82,9 @@ func (f *fakeNode) Run(_ context.Context, cmd string, stdin io.Reader) (sshx.Res
 			return sshx.Result{Exit: 3, Stderr: "the new version did not stay running; the previous version was restored\n"}, nil
 		}
 		f.backup, f.sha = f.sha, want
+		if f.onInstall != nil {
+			f.onInstall()
+		}
 		return sshx.Result{Stdout: "{}"}, nil
 	case strings.HasSuffix(cmd, " rollback"):
 		if f.backup == "" {
@@ -312,6 +319,18 @@ func TestAVersionThatRunsButFailsTheChecksIsRolledBackByThePanel(t *testing.T) {
 	}
 	if !strings.Contains(res.Detail, "token: no answer") {
 		t.Fatalf("the reason should be in the message: %q", res.Detail)
+	}
+}
+
+// The admin closing the page while the new version is failing its checks must not leave it on the node.
+func TestAFailingVersionIsRolledBackEvenWhenTheCallerGivesUp(t *testing.T) {
+	f := newFake("oldsha")
+	f.healthy = false
+	ctx, cancel := context.WithCancel(context.Background())
+	f.onInstall = cancel
+	f.ops().Upgrade(ctx, nodeWithSSH("1.2.3.4"), bin("v2-broken"))
+	if !f.rolledBack || f.sha != "oldsha" {
+		t.Fatalf("the broken version was left on the node: sha=%s", f.sha)
 	}
 }
 

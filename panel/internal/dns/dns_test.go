@@ -266,6 +266,23 @@ func TestSpaceshipRestoresTheOldListWhenTheNewOneCannotBeWritten(t *testing.T) {
 	}
 }
 
+// The caller giving up while the new records are being added must not leave the name empty: the old ones
+// are put back with a context of their own.
+func TestSpaceshipRestoresEvenWhenTheCallerGaveUp(t *testing.T) {
+	f := newFakeSpaceship(t)
+	old := []string{"1/2:old1", "2/2:old2"}
+	f.Seed(old, nil)
+	f.failPuts = 1
+	ctx, cancel := context.WithCancel(context.Background())
+	p := newSpaceship("key", "secret", Options{BaseURL: f.srv.URL, Sleep: func(time.Duration) { cancel() }})
+	if err := p.ReplaceTXT(ctx, "example.com", "_gs.example.com", []string{"1/1:new"}); err == nil {
+		t.Fatal("a failed write must be reported")
+	}
+	if !equalSets(f.Ours(), old) {
+		t.Fatalf("the apps are left without a list: %v", f.Ours())
+	}
+}
+
 func TestSpaceshipPagesThroughManyRecords(t *testing.T) {
 	f := newFakeSpaceship(t)
 	f.Seed([]string{"1/3:a", "2/3:b", "3/3:c"}, []string{"x", "y", "z"}) // 3+3+2 records, pages of 2

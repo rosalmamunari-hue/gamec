@@ -18,7 +18,7 @@
 
 | 防护 | 做法 |
 |---|---|
-| 登录 | 用户名加密码（argon2id）加**二次验证码（TOTP）**，缺一不可；5 次失败锁 15 分钟；每个 IP 10 分钟最多 10 次 |
+| 登录 | 用户名加密码（argon2id）加**二次验证码（TOTP）**，缺一不可；5 次失败锁 15 分钟（锁定期间猜测一律拒绝，但正确的密码加验证码仍能登录，别人没法故意把你锁在外面）；每个 IP 10 分钟最多 10 次 |
 | 会话 | 空闲 30 分钟、最长 12 小时失效；Cookie 为 HttpOnly + SameSite=Strict（HTTPS 下加 Secure） |
 | 改动 | 每个修改都要 CSRF 令牌，并且拒绝来自其他站点的请求；只读账号一律改不了 |
 | 保险库 | 私钥、密钥、凭据加密存放（scrypt + AES-256-GCM）。**口令不落盘**，面板重启后是"封存"状态，管理员在网页里输入口令才打开。磁盘或备份泄露不会泄露密钥 |
@@ -172,7 +172,7 @@ panel.example.com {
 
 ### 怎么接上一台服务器
 
-1. 在面板的服务器上：`./panel ssh-keygen`（只需一次，生成面板自己的 SSH 密钥）。
+1. 在面板的服务器上：`./panel ssh-keygen`（只需一次，生成面板自己的 SSH 密钥；先 `systemctl stop gamec-panel`，做完再启动）。
 2. 网页 **SSH management** → 填一个包含 `nodectl-linux-amd64` 的发布版本（从 v0.2.0 起会随发布附带）→ 生成脚本。
    建议把"只允许这个地址登录"填上面板自己的地址。
 3. **读一遍脚本**，然后在节点的服务器上以 root 运行一次。它会打印这台服务器的主机密钥指纹。
@@ -228,6 +228,9 @@ panel get-secret -name cluster/<id>/node_secret    读密钥（会写审计）
 panel verify-audit                  检查审计日志是否被改过
 panel serve [-listen A] [-secure] [-trust-proxy] [-probe-interval 1m] [-tick 30s]
 ```
+
+`init`、`adduser`、`import-cluster`、`ssh-keygen`、`set-secret` 会改数据文件，**面板运行时会被拒绝**（提示先停服务或在网页里改）：
+面板把这些文件放在内存里整份重写，两边同时写会互相覆盖。`get-secret` 和 `verify-audit` 可以在面板运行时用，审计日志会正确接上。
 
 ## 加密名單與「下一批域名」
 

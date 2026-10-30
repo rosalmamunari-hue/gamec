@@ -113,3 +113,31 @@ func TestEmptyLogVerifies(t *testing.T) {
 		}
 	}
 }
+
+// The server and a command such as `panel get-secret` each hold a Log on the same file; taking turns must
+// keep one chain, or the server refuses to start after its next restart.
+func TestTwoWritersOnOneFileKeepOneChain(t *testing.T) {
+	server, p := newLog(t)
+	fill(t, server, 2)
+	cli, err := Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fill(t, cli, 1)
+	fill(t, server, 2)
+	fill(t, cli, 1)
+	if n, err := Verify(p); err != nil || n != 6 {
+		t.Fatalf("n=%d err=%v", n, err)
+	}
+}
+
+func TestAnEntryThatDoesNotContinueTheChainIsNotBuiltOn(t *testing.T) {
+	l, p := newLog(t)
+	fill(t, l, 2)
+	f, _ := os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0o600)
+	f.WriteString(`{"action":"forged","prev":"x","hash":"y"}` + "\n")
+	f.Close()
+	if err := l.Append(Entry{User: "admin", Action: "publish"}); err == nil {
+		t.Fatal("an append after a forged entry must fail")
+	}
+}

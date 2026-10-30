@@ -122,7 +122,7 @@ func (s *spaceship) ReplaceTXT(ctx context.Context, zone, fqdn string, values []
 		}
 	}
 	if len(missing) > 0 {
-		put := func(vs []string) error {
+		putWith := func(ctx context.Context, vs []string) error {
 			items := make([]ssItem, 0, len(vs))
 			for _, v := range vs {
 				items = append(items, ssItem{Type: "TXT", Name: short, Value: v, TTL: 60})
@@ -130,6 +130,7 @@ func (s *spaceship) ReplaceTXT(ctx context.Context, zone, fqdn string, values []
 			_, err := s.do(ctx, http.MethodPut, zone, nil, map[string]any{"force": true, "items": items})
 			return err
 		}
+		put := func(vs []string) error { return putWith(ctx, vs) }
 		var perr error
 		for attempt := 0; attempt < 3; attempt++ {
 			if perr = put(missing); perr == nil {
@@ -137,9 +138,12 @@ func (s *spaceship) ReplaceTXT(ctx context.Context, zone, fqdn string, values []
 			}
 			s.opt.sleep(time.Duration(attempt+1) * time.Second)
 		}
-		// The old records are already gone; put them back so the apps keep a working list.
+		// The old records are already gone; put them back so the apps keep a working list. With a context of
+		// its own: the one above may be what failed.
 		if len(stale) > 0 {
-			put(stale)
+			rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			putWith(rctx, stale)
+			cancel()
 		}
 		return fmt.Errorf("adding new records failed (old ones restored if possible): %w", perr)
 	}

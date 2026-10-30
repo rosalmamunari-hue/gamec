@@ -31,12 +31,14 @@ type fakeProv struct {
 	calls  [][]string
 	fail   error
 	manual bool
+	ctxErr []error // ctx.Err() as each write saw it
 }
 
 func (f *fakeProv) Name() string { return "fake" }
-func (f *fakeProv) ReplaceTXT(_ context.Context, _, _ string, values []string) error {
+func (f *fakeProv) ReplaceTXT(ctx context.Context, _, _ string, values []string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.ctxErr = append(f.ctxErr, ctx.Err())
 	f.calls = append(f.calls, append([]string(nil), values...))
 	if f.manual {
 		return dns.ErrManual
@@ -192,6 +194,21 @@ func TestPublishSignsAndSendsAVerifiableList(t *testing.T) {
 	es, _ := audit.Tail(e.auth, 1)
 	if es[0].User != "alice" || es[0].IP != "10.0.0.5" || es[0].Action != "publish" || !es[0].OK {
 		t.Fatalf("audit entry: %+v", es[0])
+	}
+}
+
+// The admin reloading the page cancels the request; the DNS change must still run to the end, or a provider
+// can be stopped between removing the old records and adding the new ones.
+func TestPublishWritesDNSEvenWhenTheCallerHasGoneAway(t *testing.T) {
+	e := newEnv(t)
+	c := e.addCluster("official")
+	a := e.addNode(c, "hk-1")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	e.pub.Publish(ctx, c.ID, []*store.Node{a}, "alice", "10.0.0.5", "manual")
+	p := e.provFor(c)
+	if p.count() != 1 || p.ctxErr[0] != nil {
+		t.Fatalf("writes=%d, the write saw ctx error %v", p.count(), p.ctxErr)
 	}
 }
 
