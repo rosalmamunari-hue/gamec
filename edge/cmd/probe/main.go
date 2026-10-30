@@ -11,8 +11,10 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strconv"
@@ -53,6 +55,49 @@ func dial(addr, pin, tok string) (*tls.Conn, time.Duration, error) {
 	binary.BigEndian.PutUint16(h[:], uint16(len(tok)))
 	c.Write(append(h[:], tok...))
 	return c, rtt, nil
+}
+
+// requestToken sends "GET-TOKEN <id>" and reads the node's one-frame JSON answer.
+func requestToken(addr, pin, id string) (string, error) {
+	c2, err := tls.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}, "tcp", addr, &tls.Config{
+		MinVersion:         tls.VersionTLS13,
+		InsecureSkipVerify: true,
+		VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error {
+			cert, err := x509.ParseCertificate(raw[0])
+			if err != nil {
+				return err
+			}
+			spki, _ := x509.MarshalPKIXPublicKey(cert.PublicKey)
+			sum := sha256.Sum256(spki)
+			if base64.StdEncoding.EncodeToString(sum[:]) != pin {
+				return fmt.Errorf("pin mismatch")
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	defer c2.Close()
+	msg := "GET-TOKEN " + id
+	var h [2]byte
+	binary.BigEndian.PutUint16(h[:], uint16(len(msg)))
+	c2.Write(append(h[:], msg...))
+	c2.SetReadDeadline(time.Now().Add(4 * time.Second))
+	if _, err := io.ReadFull(c2, h[:]); err != nil {
+		return "", fmt.Errorf("no answer (old node version?): %v", err)
+	}
+	body := make([]byte, binary.BigEndian.Uint16(h[:]))
+	if _, err := io.ReadFull(c2, body); err != nil {
+		return "", err
+	}
+	var r struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(body, &r); err != nil || r.Token == "" {
+		return "", fmt.Errorf("bad reply %q", body)
+	}
+	return r.Token, nil
 }
 
 // stays reports whether the server keeps the connection open for a short while.
@@ -100,6 +145,20 @@ func main() {
 		fmt.Println("ok   bad token rejected")
 	}
 	c.Close()
+
+	// token issued by the node itself (needs the node to run the new version)
+	if tok, err := requestToken(*addr, *pin, "probe-device-0123456789"); err != nil {
+		fmt.Println("FAIL node-issued token:", err)
+	} else if c, _, err := dial(*addr, *pin, tok); err != nil {
+		fmt.Println("FAIL connect with node-issued token:", err)
+	} else {
+		if stays(c) {
+			fmt.Println("ok   node issues a token and accepts it")
+		} else {
+			fmt.Println("FAIL node-issued token was not accepted")
+		}
+		c.Close()
+	}
 
 	if _, _, err := dial(*addr, "AAAA", "x"); err != nil {
 		fmt.Println("ok   wrong pin refused by client")
