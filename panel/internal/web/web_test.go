@@ -288,7 +288,7 @@ func TestSecurityHeadersOnEveryResponse(t *testing.T) {
 			t.Errorf("%s: CSP %q", p, csp)
 		}
 		if h.Get("X-Content-Type-Options") != "nosniff" || h.Get("X-Frame-Options") != "DENY" ||
-			h.Get("Referrer-Policy") != "no-referrer" || h.Get("Cache-Control") != "no-store" ||
+			h.Get("Referrer-Policy") != "same-origin" || h.Get("Cache-Control") != "no-store" ||
 			!strings.Contains(h.Get("Strict-Transport-Security"), "max-age") {
 			t.Errorf("%s: missing a header: %v", p, h)
 		}
@@ -338,6 +338,33 @@ func TestACrossSiteRequestIsRefusedEvenWithTheToken(t *testing.T) {
 	st, _, _ := c.post("/cluster/"+cl.ID+"/node", form, map[string]string{"Origin": "https://evil.example"})
 	if st != http.StatusForbidden || len(e.st.Snapshot().Nodes) != 0 {
 		t.Fatalf("a request from another origin got through: %d", st)
+	}
+}
+
+// Browsers send "Origin: null" for same-site forms under some referrer policies; Sec-Fetch-Site tells the truth.
+func TestOriginNullIsJudgedBySecFetchSite(t *testing.T) {
+	e := newEnv(t, false)
+	c := e.admin()
+	cl := e.seedCluster("official")
+	try := func(h map[string]string, host string) int {
+		form := url.Values{"csrf": {c.csrf()}, "name": {"n" + host}, "host": {host}, "port": {"30800"}, "pin": {pin}}
+		st, _, _ := c.post("/cluster/"+cl.ID+"/node", form, h)
+		return st
+	}
+	if st := try(map[string]string{"Origin": "null", "Sec-Fetch-Site": "same-origin"}, "1.2.3.4"); st == http.StatusForbidden {
+		t.Fatal("a same-origin form with Origin: null was refused")
+	}
+	if st := try(map[string]string{"Origin": "null", "Sec-Fetch-Site": "cross-site"}, "1.2.3.5"); st != http.StatusForbidden {
+		t.Fatal("a cross-site request got through")
+	}
+	if st := try(map[string]string{"Sec-Fetch-Site": "same-site"}, "1.2.3.6"); st != http.StatusForbidden {
+		t.Fatal("a request from a sibling site got through")
+	}
+	if st := try(map[string]string{"Origin": "null"}, "1.2.3.7"); st != http.StatusForbidden {
+		t.Fatal("Origin: null with no Sec-Fetch-Site says nothing and must be refused")
+	}
+	if n := len(e.st.Snapshot().Nodes); n != 1 {
+		t.Fatalf("expected exactly the one same-origin node, got %d", n)
 	}
 }
 

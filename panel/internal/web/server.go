@@ -210,7 +210,7 @@ func (s *Server) headers(next http.Handler) http.Handler {
 		h.Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
-		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("Referrer-Policy", "same-origin") // not "no-referrer": that makes Firefox send Origin: null on our own forms
 		h.Set("Cache-Control", "no-store")
 		h.Set("Cross-Origin-Opener-Policy", "same-origin")
 		if s.Secure {
@@ -220,8 +220,13 @@ func (s *Server) headers(next http.Handler) http.Handler {
 	})
 }
 
-// sameOrigin refuses a state-changing request whose Origin (or Referer) points somewhere else.
+// sameOrigin refuses a state-changing request that comes from another site. Browsers say where a request
+// comes from in Sec-Fetch-Site, which cannot be forged by a web page; older ones are judged by Origin or
+// Referer. (An Origin of "null" tells nothing, so without Sec-Fetch-Site it is refused.)
 func sameOrigin(r *http.Request) bool {
+	if site := r.Header.Get("Sec-Fetch-Site"); site != "" {
+		return site == "same-origin" || site == "none"
+	}
 	o := r.Header.Get("Origin")
 	if o == "" {
 		o = r.Header.Get("Referer")
@@ -252,8 +257,10 @@ func (s *Server) need(admin bool, h func(http.ResponseWriter, *http.Request, *au
 		}
 		r = r.WithContext(context.WithValue(r.Context(), ctxKey{}, sess))
 		if r.Method == http.MethodPost {
-			if !sameOrigin(r) || !auth.CheckCSRF(sess.CSRF, r.FormValue("csrf")) {
-				s.log(r, "csrf-rejected", r.URL.Path, false)
+			origin, tokenOK := sameOrigin(r), auth.CheckCSRF(sess.CSRF, r.FormValue("csrf"))
+			if !origin || !tokenOK {
+				s.log(r, "csrf-rejected", fmt.Sprintf("%s same-origin=%v token=%v host=%s origin=%s", r.URL.Path, origin, tokenOK,
+					safe(r.Host), safe(r.Header.Get("Origin"))), false)
 				http.Error(w, "表單已過期或來自其他網站；請重新整理頁面再試一次", http.StatusForbidden)
 				return
 			}
