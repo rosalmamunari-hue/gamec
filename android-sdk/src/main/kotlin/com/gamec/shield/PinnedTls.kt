@@ -1,9 +1,9 @@
 package com.gamec.shield
 
-import android.util.Base64
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.security.MessageDigest
+import java.util.Base64
 import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
 import javax.net.ssl.SSLContext
@@ -19,7 +19,7 @@ internal object PinnedTls {
         override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
             val spki = chain.firstOrNull()?.publicKey?.encoded
                 ?: throw CertificateException("empty chain")
-            val got = Base64.encodeToString(MessageDigest.getInstance("SHA-256").digest(spki), Base64.NO_WRAP)
+            val got = Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(spki))
             if (got != pin) throw CertificateException("pin mismatch")
         }
 

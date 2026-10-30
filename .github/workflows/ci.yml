@@ -30,8 +30,21 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.7"
-      - name: build SDK (release AAR)
-        working-directory: android-sdk
-        run: gradle --no-daemon assembleRelease
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - name: test SDK against a local edge node, then build the release AAR
+        run: |
+          set -e
+          cd edge
+          go build -o /tmp/edge .
+          go run ./cmd/gencert -host 127.0.0.1 -out /tmp/certs | tee /tmp/gencert.out
+          export GAMEC_TEST_PIN=$(grep '^pin:' /tmp/gencert.out | awk '{print $2}')
+          export GAMEC_TEST_SECRET=test-secret-not-a-real-one
+          /tmp/edge -listen 127.0.0.1:30800 -origin 127.0.0.1:9000 \
+            -cert /tmp/certs/cert.pem -key /tmp/certs/key.pem -secret "$GAMEC_TEST_SECRET" > /tmp/edge.log 2>&1 &
+          sleep 2
+          cd ../android-sdk
+          gradle --no-daemon testDebugUnitTest assembleRelease || { echo "--- edge log:"; cat /tmp/edge.log; exit 1; }
 
   # iOS is built on Codemagic (see codemagic.yaml): GitHub's macOS runners queue for too long.
