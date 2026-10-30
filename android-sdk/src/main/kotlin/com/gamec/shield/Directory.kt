@@ -93,8 +93,7 @@ internal object ListVerifier {
  */
 internal class NodeDirectory(
     private val cfg: DiscoveryConfig,
-    private val queryTxt: (String) -> List<String> =
-        { Doh.queryTxt(it, cfg.dohProviders, cfg.timeoutMs) },
+    private val queryTxt: (String) -> List<String> = { Resolvers.query(cfg, it) },
     private val clock: () -> Long = { System.currentTimeMillis() / 1000 },
 ) {
     private var current: NodeList? = null

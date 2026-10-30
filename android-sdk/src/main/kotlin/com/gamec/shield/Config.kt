@@ -41,8 +41,18 @@ class DiscoveryConfig(
     val publicKey: String,
     /** Stable random id for this install; see [DeviceId.getOrCreate]. */
     val deviceId: String,
-    /** DoH JSON endpoints, tried in order. Add more than one: some are unreachable in some countries. */
-    val dohProviders: List<String> = listOf(Doh.CLOUDFLARE),
+    /**
+     * DNS-over-HTTPS JSON endpoints. Use IP addresses so no lookup is needed to reach them. Add several:
+     * some are unreachable in some countries.
+     */
+    val dohProviders: List<String> = DnsDefaults.doh,
+    /** DNS-over-TLS servers (port 853, or "host:port"), by IP address. Empty = DoH only. */
+    val dotServers: List<String> = DnsDefaults.dot,
+    /**
+     * All resolvers are tried at once, started this far apart (DoT first, then DoH, interleaved); the first
+     * answer whose signature verifies wins. A resolver cannot win with a forged list.
+     */
+    val resolverStaggerMs: Long = 200,
     val timeoutMs: Int = 5000,
     /** Re-read the records this often. */
     val refreshSec: Long = 600,

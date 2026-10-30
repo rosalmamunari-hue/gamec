@@ -147,7 +147,7 @@ class DeviceTest {
         assumeTrue("discovery args not given", doh.isNotEmpty() && listKey.isNotEmpty())
         val ctx = InstrumentationRegistry.getInstrumentation().targetContext
         val cfg = DiscoveryConfig("_gs.example.com", listKey, DeviceId.getOrCreate(ctx),
-            dohProviders = listOf(doh), store = PrefsListStore(ctx))
+            dohProviders = listOf(doh), dotServers = emptyList(), store = PrefsListStore(ctx))
         val shield = ShieldClient(ShieldConfig(discovery = cfg))
         val p = shield.start()
         try {
