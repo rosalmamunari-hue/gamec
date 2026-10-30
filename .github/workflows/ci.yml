@@ -67,6 +67,12 @@ jobs:
           export GAMEC_TEST_CONTROL_URL=http://127.0.0.1:8099/v1/session
           sleep 2
           cd ../android-sdk
-          gradle --no-daemon testDebugUnitTest assembleRelease || { echo "--- edge log:"; cat /tmp/edge.log; echo "--- control log:"; cat /tmp/control.log; exit 1; }
+          gradle --no-daemon testDebugUnitTest assembleRelease assembleDebugAndroidTest || { echo "--- edge log:"; cat /tmp/edge.log; echo "--- control log:"; cat /tmp/control.log; exit 1; }
+
+      - name: keep the on-device test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-test-apk
+          path: android-sdk/build/outputs/apk/androidTest/debug/*.apk
 
   # iOS is built on Codemagic (see codemagic.yaml): GitHub's macOS runners queue for too long.
