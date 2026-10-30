@@ -60,6 +60,8 @@ workflows:
           export GAMEC_TEST_LIST_KEY=$(/tmp/signlist -gen-key /tmp/list.key | grep '^public key' | awk '{print $NF}')
           /tmp/signlist -key /tmp/list.key -nodes /tmp/nodes.json -serve 127.0.0.1:8053 > /tmp/signlist.log 2>&1 &
           export GAMEC_TEST_DOH_URL=http://127.0.0.1:8053/dns-query
+          # opt-in live test of DoT/DoH against the real public resolvers (this is the public project domain)
+          export GAMEC_TEST_LIVE_NAME=_gs.getnodepx.cfd
           sleep 2
 
           cd "$CM_BUILD_DIR/ios-sdk"

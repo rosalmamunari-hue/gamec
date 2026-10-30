@@ -99,7 +99,7 @@ final class NodeDirectory {
          queryTxt: ((String) -> [String])? = nil,
          clock: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970) }) {
         self.cfg = cfg
-        self.queryTxt = queryTxt ?? { Doh.queryTxt(name: $0, providers: cfg.dohProviders, timeout: cfg.timeout) }
+        self.queryTxt = queryTxt ?? { Resolvers.query(cfg: cfg, name: $0) }
         self.clock = clock
         if let saved = cfg.store?.load(), !saved.isEmpty {
             current = try? ListVerifier.parse(saved, publicKeyB64: cfg.publicKey, now: clock())

@@ -40,7 +40,7 @@ enum TokenClient {
         return IssuedToken(token: r.token, expiresAt: r.expires_at)
     }
 
-    private static func receiveExactly(_ conn: NWConnection, _ count: Int, _ timeout: TimeInterval) throws -> Data {
+    static func receiveExactly(_ conn: NWConnection, _ count: Int, _ timeout: TimeInterval) throws -> Data {
         var buf = Data()
         while buf.count < count {
             let got = DispatchSemaphore(value: 0)

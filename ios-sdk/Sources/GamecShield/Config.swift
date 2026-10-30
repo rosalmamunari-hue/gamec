@@ -61,8 +61,14 @@ public struct DiscoveryConfig {
     public let publicKey: String
     /// Stable random id for this install; see `DeviceID.getOrCreate()`.
     public let deviceId: String
-    /// DoH JSON endpoints, tried in order. Add more than one: some are unreachable in some countries.
+    /// DNS-over-HTTPS JSON endpoints. Use IP addresses so no lookup is needed to reach them. Add several:
+    /// some are unreachable in some countries.
     public let dohProviders: [String]
+    /// DNS-over-TLS servers (port 853, or "host:port"), by IP address. Empty = DoH only.
+    public let dotServers: [String]
+    /// All resolvers are tried at once, started this far apart (DoT first, then DoH, interleaved); the first
+    /// answer whose signature verifies wins. A resolver cannot win with a forged list.
+    public let resolverStagger: TimeInterval
     public let timeout: TimeInterval
     /// Re-read the records this often.
     public let refreshInterval: TimeInterval
@@ -74,15 +80,20 @@ public struct DiscoveryConfig {
     public let store: ListStore?
 
     public init(name: String, publicKey: String, deviceId: String,
-                dohProviders: [String] = ["https://cloudflare-dns.com/dns-query"],
+                dohProviders: [String] = DnsDefaults.doh,
+                dotServers: [String] = DnsDefaults.dot,
+                resolverStagger: TimeInterval = 0.2,
                 timeout: TimeInterval = 5, refreshInterval: TimeInterval = 600,
                 retryInterval: TimeInterval = 30, tokenMargin: TimeInterval = 60,
                 store: ListStore? = nil) throws {
-        guard isValidDeviceId(deviceId), !dohProviders.isEmpty else { throw ShieldError.invalidDeviceId }
+        guard isValidDeviceId(deviceId) else { throw ShieldError.invalidDeviceId }
+        guard !(dohProviders.isEmpty && dotServers.isEmpty) else { throw ShieldError.emptyNodeList }
         self.name = name
         self.publicKey = publicKey
         self.deviceId = deviceId
         self.dohProviders = dohProviders
+        self.dotServers = dotServers
+        self.resolverStagger = resolverStagger
         self.timeout = timeout
         self.refreshInterval = refreshInterval
         self.retryInterval = retryInterval

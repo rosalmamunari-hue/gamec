@@ -119,7 +119,8 @@ final class ShieldTests: XCTestCase {
         let env = ProcessInfo.processInfo.environment
         try XCTSkipIf(env["GAMEC_TEST_DOH_URL"] == nil || env["GAMEC_TEST_LIST_KEY"] == nil, "discovery env not set")
         let d = try DiscoveryConfig(name: "_gs.example.com", publicKey: env["GAMEC_TEST_LIST_KEY"]!,
-                                    deviceId: "device-ios-e2e-000000003", dohProviders: [env["GAMEC_TEST_DOH_URL"]!])
+                                    deviceId: "device-ios-e2e-000000003", dohProviders: [env["GAMEC_TEST_DOH_URL"]!],
+                                    dotServers: [])
         let shield = ShieldClient(config: ShieldConfig(discovery: d))
         let proxyPort = try shield.start()
         defer { shield.stop() }
@@ -131,7 +132,8 @@ final class ShieldTests: XCTestCase {
         try XCTSkipIf(env["GAMEC_TEST_DOH_URL"] == nil, "discovery env not set")
         let wrong = P256.Signing.PrivateKey().publicKey.derRepresentation.base64EncodedString()
         let d = try DiscoveryConfig(name: "_gs.example.com", publicKey: wrong,
-                                    deviceId: "device-ios-e2e-000000004", dohProviders: [env["GAMEC_TEST_DOH_URL"]!])
+                                    deviceId: "device-ios-e2e-000000004", dohProviders: [env["GAMEC_TEST_DOH_URL"]!],
+                                    dotServers: [])
         let shield = ShieldClient(config: ShieldConfig(discovery: d, connectRetryWindow: 0))
         let proxyPort = try shield.start()
         defer { shield.stop() }
