@@ -6,6 +6,7 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -38,13 +39,20 @@ class ShieldClient(private val cfg: ShieldConfig) {
                         waited += 500
                     }
                 }
-            } catch (_: InterruptedException) {
+            } catch (_: Exception) {
+                // InterruptedException from stop(), or a failure fetching the session; the loop just ends
             }
         }
         pool.execute {
             while (running.get()) {
                 val c = try { ss.accept() } catch (_: Exception) { break }
-                pool.execute { relay(c) }
+                try {
+                    pool.execute { relay(c) }
+                } catch (_: RejectedExecutionException) {
+                    // stop() raced with this connection
+                    try { c.close() } catch (_: Exception) {}
+                    break
+                }
             }
         }
         return ss.localPort
@@ -81,17 +89,29 @@ class ShieldClient(private val cfg: ShieldConfig) {
         return null
     }
 
+    /**
+     * Runs on a pool thread. stop() interrupts these threads, and an exception that escapes here would be
+     * uncaught, which kills the whole app on Android, so nothing may propagate.
+     */
     private fun relay(local: Socket) {
-        local.tcpNoDelay = true
-        val up = openUpstream()
-        if (up == null) {
-            local.close()
-            return
+        var up: Socket? = null
+        try {
+            local.tcpNoDelay = true
+            up = openUpstream()
+            if (up == null) {
+                local.close()
+                return
+            }
+            val upstream = up
+            val t = Thread { pipe(local.getInputStream(), upstream.getOutputStream(), local, upstream) }
+            t.start()
+            pipe(upstream.getInputStream(), local.getOutputStream(), local, upstream)
+            t.join()
+        } catch (_: Exception) {
+            // includes InterruptedException from stop(); just release both sockets
+            try { local.close() } catch (_: Exception) {}
+            try { up?.close() } catch (_: Exception) {}
         }
-        val t = Thread { pipe(local.getInputStream(), up.getOutputStream(), local, up) }
-        t.start()
-        pipe(up.getInputStream(), local.getOutputStream(), local, up)
-        t.join()
     }
 
     private fun pipe(i: InputStream, o: OutputStream, a: Socket, b: Socket) {
