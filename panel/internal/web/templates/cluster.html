@@ -1,0 +1,119 @@
+{{template "head" .}}
+{{$p := .}}
+{{$row := .Data.Row}}
+{{$c := $row.C}}
+
+<p class="muted">{{if $c.Origin}}Forwards to {{$c.Origin}}. {{end}}Each signed list is valid {{$c.ValidDays}} days and is renewed {{$c.RenewBeforeDays}} days before it expires.</p>
+{{range $row.Alerts}}<p class="alert">&#9888; {{.}}</p>{{end}}
+{{if $row.Note}}<p class="muted">{{$row.Note}}</p>{{end}}
+
+<section class="card">
+  <h2>Nodes <span class="pill {{if eq $row.OK $row.All}}ok{{else if eq $row.OK 0}}bad{{else}}warn{{end}}">{{$row.OK}} / {{$row.All}} ok</span></h2>
+  <table>
+    <tr><th>Name</th><th>Address</th><th>Status</th>{{if $p.Admin}}<th>Actions</th>{{end}}</tr>
+    {{range $row.Nodes}}
+    <tr class="node {{.Status}}">
+      <td>{{.N.Name}}</td>
+      <td><code>{{.N.Host}}:{{.N.Port}}</code></td>
+      <td><span class="dot"></span> {{.Detail}}{{if .Latency}} &middot; {{.Latency}}{{end}}</td>
+      {{if $p.Admin}}
+      <td class="actions">
+        <form method="post" action="/cluster/{{$c.ID}}/node/{{.N.ID}}/enable" class="inline">
+          <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+          <input type="hidden" name="enabled" value="{{if .N.Enabled}}0{{else}}1{{end}}">
+          <button>{{if .N.Enabled}}Switch off{{else}}Switch on{{end}}</button>
+        </form>
+        <form method="post" action="/cluster/{{$c.ID}}/node/{{.N.ID}}/pause" class="inline">
+          <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+          <input name="minutes" value="30" size="3" aria-label="minutes">
+          <button title="take it out of the list for a while; it returns by itself">Pause (min)</button>
+        </form>
+        <form method="post" action="/cluster/{{$c.ID}}/node/{{.N.ID}}/delete" class="inline">
+          <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+          <button class="danger">Delete</button>
+        </form>
+      </td>
+      {{end}}
+    </tr>
+    {{end}}
+  </table>
+  {{if $p.Admin}}
+  <form method="post" action="/cluster/{{$c.ID}}/probe" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button>Probe now</button></form>
+  <details>
+    <summary>Add a node</summary>
+    <form method="post" action="/cluster/{{$c.ID}}/node" class="stack">
+      <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+      <label>Name <input name="name" required></label>
+      <label>Host (IP or DNS name) <input name="host" required></label>
+      <label>Port <input name="port" value="30800" required></label>
+      <label>Pin (from <code>gencert</code>) <input name="pin" size="48" required></label>
+      <button>Add node</button>
+    </form>
+  </details>
+  {{end}}
+</section>
+
+<section class="card">
+  <h2>Publishing</h2>
+  {{if $c.Last.At.IsZero}}
+    <p class="muted">Nothing has been published for this cluster yet.</p>
+  {{else}}
+    <p>Last published {{ago $c.Last.At}} (<span class="muted">{{ts $c.Last.At}} UTC</span>): {{$c.Last.Result}}.<br>
+       Valid until {{ts (unixTime $c.Last.Exp)}} UTC ({{until $c.Last.Exp}}).</p>
+    <ul>{{range $c.Last.Nodes}}<li><code>{{.}}</code></li>{{end}}</ul>
+  {{end}}
+  {{if $c.Last.Manual}}
+    <p class="alert">Paste these as separate TXT records at the manual target(s), then they are live:</p>
+    <pre>{{range $c.Last.Records}}{{.}}
+{{end}}</pre>
+  {{end}}
+  {{if $p.Admin}}
+  <form method="post" action="/cluster/{{$c.ID}}/publish" class="inline">
+    <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+    <button class="primary">Sign and publish now</button>
+  </form>
+  <form method="post" action="/cluster/{{$c.ID}}/auto" class="inline">
+    <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+    <input type="hidden" name="auto" value="{{if $c.AutoPublish}}0{{else}}1{{end}}">
+    <button>{{if $c.AutoPublish}}Turn automatic publishing off{{else}}Turn automatic publishing on{{end}}</button>
+  </form>
+  <p class="muted">Automatic publishing removes a node that keeps failing, adds one that has proved itself, and renews the list before it expires.</p>
+  {{end}}
+</section>
+
+<section class="card">
+  <h2>DNS targets</h2>
+  <table>
+    <tr><th>Provider</th><th>Name</th><th>Zone</th><th>Credentials</th>{{if $p.Admin}}<th></th>{{end}}</tr>
+    {{range $i, $t := $c.Targets}}
+    <tr><td>{{$t.Provider}}</td><td><code>{{$t.Name}}</code></td><td>{{$t.Zone}}</td><td>{{if $t.CredRef}}{{$t.CredRef}}{{else}}-{{end}}</td>
+      {{if $p.Admin}}<td><form method="post" action="/cluster/{{$c.ID}}/target/{{$i}}/delete" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button class="danger">Remove</button></form></td>{{end}}
+    </tr>
+    {{end}}
+  </table>
+  {{if $p.Admin}}
+  <details>
+    <summary>Add a DNS target</summary>
+    <form method="post" action="/cluster/{{$c.ID}}/target" class="stack">
+      <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+      <label>Provider
+        <select name="provider"><option>manual</option><option>cloudflare</option><option>spaceship</option><option>aliyun</option></select></label>
+      <label>Zone (the registered domain) <input name="zone" placeholder="example.com" required></label>
+      <label>Record name <input name="dns_name" placeholder="_gs.example.com" required></label>
+      <label>Credentials name (see "DNS credentials"; not needed for manual) <input name="cred_ref"></label>
+      <button>Add target</button>
+    </form>
+  </details>
+  {{end}}
+</section>
+
+<section class="card">
+  <h2>For the app</h2>
+  <p>Put these in the app's <code>DiscoveryConfig</code>:</p>
+  <dl>
+    <dt>DNS name</dt><dd>{{range $c.Targets}}<code>{{.Name}}</code> {{end}}</dd>
+    <dt>Public key</dt><dd><code class="wrap">{{$c.PublicKey}}</code></dd>
+  </dl>
+  <p class="muted">Different channels use different names and keys, so each channel's build embeds its own cluster's values.</p>
+</section>
+{{template "foot" .}}

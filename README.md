@@ -22,6 +22,7 @@ and no server of your own is needed for discovery.
 | `android-sdk/` | Android library (Kotlin, minSdk 29) |
 | `ios-sdk/` | iOS sources (iOS 15+); the Swift package manifest is `Package.swift` at the repository root |
 | `control/` | Optional control service for tokens and node lists (not needed with DNS discovery) |
+| `panel/` | Control panel: monitors nodes, keeps each cluster's signed list published in DNS and renewed; see [docs/PANEL.md](docs/PANEL.md) |
 
 ## How a connection is made
 

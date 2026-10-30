@@ -1,0 +1,12 @@
+{{template "head" .}}
+<div class="banner warn"><b>Copy the token secret now.</b> It is shown only on this page. Afterwards it can be read only on the server with <code>panel get-secret</code>.</div>
+<section class="card">
+  <dl>
+    <dt>Cluster</dt><dd>{{.Data.Cluster.Name}}</dd>
+    <dt>Token secret (give it to every node of this cluster as <code>-secret</code>)</dt><dd><code class="wrap">{{.Data.NodeSecret}}</code></dd>
+    <dt>Public key (for the app)</dt><dd><code class="wrap">{{.Data.PublicKey}}</code></dd>
+  </dl>
+  <p>Next: add the nodes, set the DNS credentials, then publish by hand once.</p>
+  <p><a class="btn" href="/cluster/{{.Data.Cluster.ID}}">Open the cluster</a></p>
+</section>
+{{template "foot" .}}

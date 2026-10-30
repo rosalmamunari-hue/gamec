@@ -1,0 +1,36 @@
+{{define "head"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{.Title}} - gamec panel</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <a class="brand" href="/">gamec panel</a>
+  {{if .User}}
+  <nav>
+    <a href="/">Clusters</a>
+    {{if .Admin}}<a href="/secrets">DNS credentials</a>{{end}}
+    <a href="/audit">Audit log</a>
+    <form method="post" action="/logout" class="inline">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <span class="who">{{.User}}{{if .Admin}} (admin){{else}} (read-only){{end}}</span>
+      <button class="link">Sign out</button>
+    </form>
+  </nav>
+  {{end}}
+</header>
+<main>
+{{if .Sealed}}<div class="banner warn">The vault is <b>sealed</b>: nothing can be signed or published and automatic renewal is paused.{{if .Admin}} <a href="/unseal">Unseal it</a>.{{end}}</div>{{end}}
+{{if .Flash}}<div class="banner ok">{{.Flash}}</div>{{end}}
+{{if .Error}}<div class="banner err">{{.Error}}</div>{{end}}
+<h1>{{.Title}}</h1>
+{{end}}
+
+{{define "foot"}}
+</main>
+</body>
+</html>
+{{end}}

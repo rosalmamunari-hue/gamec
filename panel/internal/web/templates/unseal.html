@@ -1,0 +1,13 @@
+{{template "head" .}}
+<form method="post" action="/unseal" class="card narrow">
+  {{if .Sealed}}
+  <p class="muted">The vault holds the signing keys, token secrets and DNS credentials, encrypted. Enter the passphrase to open it. It is never stored; after a restart the vault is sealed again.</p>
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <label>Vault passphrase <input name="passphrase" type="password" autocomplete="off" required autofocus></label>
+  <button class="primary">Unseal</button>
+  {{else}}
+  <p>The vault is already unsealed.</p>
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  {{end}}
+</form>
+{{template "foot" .}}

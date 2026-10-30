@@ -1,0 +1,11 @@
+{{template "head" .}}
+<p>Hash chain: <b class="{{if eq .Data.Chain "intact"}}okc{{else}}badc{{end}}">{{.Data.Chain}}</b> <span class="muted">(every entry carries the hash of the one before it; a removed or edited entry breaks the chain)</span></p>
+<table>
+  <tr><th>Time (UTC)</th><th>User</th><th>From</th><th>Action</th><th>Detail</th><th>OK</th></tr>
+  {{range .Data.Entries}}
+  <tr class="{{if .OK}}{{else}}failed{{end}}">
+    <td>{{ts .Time}}</td><td>{{.User}}</td><td>{{.IP}}</td><td>{{.Action}}</td><td class="wrap">{{.Detail}}</td><td>{{if .OK}}yes{{else}}NO{{end}}</td>
+  </tr>
+  {{end}}
+</table>
+{{template "foot" .}}
