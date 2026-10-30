@@ -167,3 +167,28 @@ func (c *cloudflare) ReplaceTXT(ctx context.Context, zone, fqdn string, values [
 	}
 	return nil
 }
+
+// CloudflareZones lists the domains an API token can manage. It doubles as a check that the token is real.
+func CloudflareZones(ctx context.Context, token string, opt Options) ([]string, error) {
+	c := newCloudflare(strings.TrimSpace(token), opt)
+	var names []string
+	for page := 1; page <= 5; page++ {
+		raw, err := c.do(ctx, http.MethodGet, "/zones", url.Values{"per_page": {"50"}, "page": {fmt.Sprint(page)}}, nil)
+		if err != nil {
+			return nil, err
+		}
+		var zs []struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(raw, &zs); err != nil {
+			return nil, fmt.Errorf("cloudflare: unexpected reply: %w", err)
+		}
+		for _, z := range zs {
+			names = append(names, strings.ToLower(z.Name))
+		}
+		if len(zs) < 50 {
+			break
+		}
+	}
+	return names, nil
+}

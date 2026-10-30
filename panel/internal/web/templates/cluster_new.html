@@ -1,17 +1,23 @@
 {{template "head" .}}
+<p class="lead">新增一個全新的渠道。面板會為它生成一套新的簽名密鑰，存進保險庫。（要把舊的渠道原樣搬進來，請用 <code>panel import-cluster</code>。）</p>
 <form method="post" action="/cluster/new" class="card stack">
   <input type="hidden" name="csrf" value="{{.CSRF}}">
-  <p class="muted">一個集群就是一個發行渠道：有自己的源站、節點、DNS 名稱、簽名金鑰與 token 密鑰。新的簽名金鑰和 token 密鑰會在這裡產生並存入保險庫。</p>
-  <label>名稱（例如渠道名） <input name="name" required></label>
-  <label>源站（節點轉發的目標；僅供備註） <input name="origin" placeholder="203.0.113.5:10443"></label>
-  <label>每份簽名名單的有效天數 <input name="valid_days" value="30" size="4" required></label>
+  <label>渠道名稱 <span class="hint">比如渠道服的名字，方便你認。</span><input name="name" required></label>
+  <label>遊戲伺服器位址（選填） <span class="hint">節點最終把流量轉到哪裡，只是記一筆備註，比如 <code>203.0.113.5:10443</code>。</span><input name="origin" placeholder="203.0.113.5:10443"></label>
+  <label>名單每次有效幾天 <input name="valid_days" value="30" size="4" required></label>
   <label>到期前幾天開始續期 <input name="renew_days" value="10" size="4" required></label>
-  <h2>第一個 DNS 目標</h2>
+  <h2>名單要寫進哪個域名</h2>
+  <p class="muted small">之後還可以在渠道頁增加或更換。</p>
   <label>服務商
-    <select name="provider"><option>manual</option><option>cloudflare</option><option>spaceship</option><option>aliyun</option></select></label>
-  <label>Zone（已註冊的網域） <input name="zone" placeholder="example.com" required></label>
-  <label>記錄名稱 <input name="dns_name" placeholder="_gs.example.com" required></label>
-  <label>憑證名稱（manual 不需要） <input name="cred_ref" placeholder="main"></label>
-  <button class="primary">建立集群</button>
+    <select name="provider">
+      <option value="cloudflare">Cloudflare（推薦，自動寫入）</option>
+      <option value="spaceship">Spaceship（自動寫入）</option>
+      <option value="aliyun">阿里雲（自動寫入）</option>
+      <option value="manual">手動（面板只生成記錄，你自己貼）</option>
+    </select></label>
+  <label>完整網域 <span class="hint">比如 <code>cfg.example.com</code>。別用域名本身。</span><input name="dns_name" placeholder="cfg.example.com" required></label>
+  <label>主域名（Cloudflare 可留空） <span class="hint">你註冊的域名，比如 <code>example.com</code>。</span><input name="zone" placeholder="example.com"></label>
+  <label>用哪個授權（手動的不用填） <span class="hint">在「域名授權」頁存的名字，一般是 <code>main</code>。</span><input name="cred_ref" placeholder="main"></label>
+  <button class="primary">建立渠道</button>
 </form>
 {{template "foot" .}}

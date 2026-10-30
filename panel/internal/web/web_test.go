@@ -622,7 +622,7 @@ func TestSealedVaultIsAnnouncedAndUnsealingWorks(t *testing.T) {
 	c := e.admin()
 	e.vault.Seal()
 	_, body, _ := c.get("/")
-	if !strings.Contains(body, "封存") {
+	if !strings.Contains(body, "上鎖") {
 		t.Fatal("the dashboard does not say the vault is sealed")
 	}
 	if st, _, _ := c.post("/unseal", url.Values{"csrf": {c.csrf()}, "passphrase": {"wrong wrong wrong"}}, nil); st != http.StatusUnauthorized || !e.vault.Sealed() {
@@ -637,15 +637,17 @@ func TestSecretsAreWriteOnly(t *testing.T) {
 	e := newEnv(t, false)
 	c := e.admin()
 	const val = "cf-token-VALUE-that-must-not-reappear"
-	if st, _, _ := c.post("/secrets", url.Values{"csrf": {c.csrf()}, "ref": {"main"}, "field": {"api_token"}, "value": {val}}, nil); st != http.StatusSeeOther {
-		t.Fatal(st)
+	e.s.CFZones = func(_ context.Context, tok string) ([]string, error) { return []string{"example.com"}, nil }
+	st, saved, _ := c.post("/secrets", url.Values{"csrf": {c.csrf()}, "ref": {"main"}, "field": {"api_token"}, "value": {val}}, nil)
+	if st != http.StatusOK || !strings.Contains(saved, "令牌可以用") || strings.Contains(saved, val) {
+		t.Fatalf("saving a token should test it at once and never echo it: %d", st)
 	}
 	got, ok, _ := e.vault.Get("dns/main/api_token")
 	if !ok || got != val {
 		t.Fatal("not stored")
 	}
 	_, body, _ := c.get("/secrets")
-	if !strings.Contains(body, "dns/main/api_token") || strings.Contains(body, val) {
+	if !strings.Contains(body, "<b>main</b>") || !strings.Contains(body, "api_token") || strings.Contains(body, val) {
 		t.Fatal("the page must list names but never values")
 	}
 	raw, _ := os.ReadFile(e.auditP)
@@ -676,7 +678,7 @@ func TestEveryChangeIsAuditedWithWhoAndFromWhere(t *testing.T) {
 	v.post("/cluster/"+cl.ID+"/publish", url.Values{"csrf": {v.csrf()}}, nil)
 
 	_, body, _ := c.get("/audit")
-	for _, want := range []string{"login", "node-add", "csrf-rejected", "forbidden", "alice", "victor", "intact"} {
+	for _, want := range []string{"login", "node-add", "csrf-rejected", "forbidden", "alice", "victor", "沒有被改動"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the audit page does not mention %q", want)
 		}

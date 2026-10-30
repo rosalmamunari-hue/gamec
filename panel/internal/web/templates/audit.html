@@ -1,11 +1,14 @@
 {{template "head" .}}
-<p>雜湊鏈：<b class="{{if eq .Data.Chain "intact"}}okc{{else}}badc{{end}}">{{.Data.Chain}}</b> <span class="muted">（每筆紀錄都帶有前一筆的雜湊值；刪除或修改任何一筆都會使鏈中斷）</span></p>
+<p class="lead">這裡記著誰在什麼時候做了什麼。每一筆都帶著前一筆的指紋，有人偷偷刪改就會斷掉。</p>
+<p>完整性檢查：<b class="{{if eq .Data.Chain "intact"}}okc{{else}}badc{{end}}">{{if eq .Data.Chain "intact"}}沒有被改動{{else}}{{.Data.Chain}}{{end}}</b></p>
+<div class="card tablewrap">
 <table>
-  <tr><th>時間 (UTC)</th><th>使用者</th><th>來源</th><th>動作</th><th>詳情</th><th>成功</th></tr>
+  <tr><th>時間 (UTC)</th><th>誰</th><th>來自</th><th>做了什麼</th><th>細節</th><th>成功嗎</th></tr>
   {{range .Data.Entries}}
   <tr class="{{if .OK}}{{else}}failed{{end}}">
     <td>{{ts .Time}}</td><td>{{.User}}</td><td>{{.IP}}</td><td>{{.Action}}</td><td class="wrap">{{.Detail}}</td><td>{{if .OK}}是{{else}}否{{end}}</td>
   </tr>
   {{end}}
 </table>
+</div>
 {{template "foot" .}}

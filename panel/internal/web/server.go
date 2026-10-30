@@ -50,6 +50,8 @@ type Server struct {
 	ReleaseBase  string // like https://github.com/OWNER/REPO/releases/download
 	FetchHostKey func(addr string, timeout time.Duration) (fingerprint, keyType string, err error)
 	// FetchJumpKey reads the egress host's key (always directly); nil means sshx.FetchHostKey.
+	// CFZones lists the domains a Cloudflare token can manage; nil means ask Cloudflare.
+	CFZones      func(ctx context.Context, token string) ([]string, error)
 	FetchJumpKey func(addr string, timeout time.Duration) (fingerprint, keyType string, err error)
 	// Egress sends connections to nodes through a jump host; nil means they are made directly.
 	Egress *egress.Egress
@@ -107,7 +109,7 @@ func humanAgo(now, t time.Time) string {
 
 func humanUntil(now time.Time, unix int64) string {
 	if unix == 0 {
-		return "尚未發布"
+		return "還沒更新過"
 	}
 	d := time.Unix(unix, 0).Sub(now)
 	switch {
@@ -300,6 +302,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /secrets", s.need(true, s.secretsPage))
 	mux.HandleFunc("POST /secrets", s.need(true, s.secretSet))
+	mux.HandleFunc("POST /secrets/test", s.need(true, s.secretTest))
 	mux.HandleFunc("GET /unseal", s.need(true, s.unsealForm))
 	mux.HandleFunc("POST /unseal", s.need(true, s.unsealSubmit))
 	mux.HandleFunc("GET /audit", s.need(false, s.auditPage))
@@ -377,11 +380,11 @@ func (s *Server) nodeViews(st store.State, c *store.Cluster) []nodeView {
 		case now.Before(n.DisabledUntil):
 			v.Status, v.Detail = "paused", "暫停至 "+n.DisabledUntil.UTC().Format("15:04 UTC")
 		case !h.Seen:
-			v.Status, v.Detail = "unknown", "尚未探測"
+			v.Status, v.Detail = "unknown", "還沒檢查過"
 		case h.Ejected:
-			v.Status, v.Detail = "ejected", fmt.Sprintf("已移出名單：連續 %d 次探測失敗（%s）", h.ConsecFail, h.Last.Err)
+			v.Status, v.Detail = "ejected", fmt.Sprintf("已從名單拿掉：連續 %d 次檢查失敗（%s）", h.ConsecFail, h.Last.Err)
 		case h.Last.OK:
-			v.Status, v.Detail, v.Latency = "ok", "全部檢查通過", fmt.Sprintf("%d ms", h.Last.Handshake.Milliseconds())
+			v.Status, v.Detail, v.Latency = "ok", "運作正常", fmt.Sprintf("%d ms", h.Last.Handshake.Milliseconds())
 		default:
 			v.Status, v.Detail = "fail", fmt.Sprintf("失敗中（連續 %d 次）：%s", h.ConsecFail, h.Last.Err)
 		}
@@ -397,6 +400,9 @@ type clusterRow struct {
 	Expiry  string
 	Alerts  []string
 	Note    string
+	Steps   []step
+	Next    *step
+	Left    int
 }
 
 func (s *Server) clusterRow(st store.State, c *store.Cluster) clusterRow {
@@ -411,20 +417,27 @@ func (s *Server) clusterRow(st store.State, c *store.Cluster) clusterRow {
 	now := s.now()
 	switch {
 	case c.Last.At.IsZero():
-		row.Alerts = append(row.Alerts, "never published")
+		row.Alerts = append(row.Alerts, "還沒有把名單寫進域名，App 現在找不到節點")
 	case time.Unix(c.Last.Exp, 0).Before(now):
-		row.Alerts = append(row.Alerts, "the published list has EXPIRED: players cannot find nodes")
+		row.Alerts = append(row.Alerts, "名單已經過期，玩家找不到節點！請立刻更新名單")
 	case time.Unix(c.Last.Exp, 0).Sub(now) < time.Duration(c.RenewBeforeDays)*24*time.Hour:
 		row.Alerts = append(row.Alerts, "名單已進入續期期間")
 	}
 	if c.Last.Manual {
-		row.Alerts = append(row.Alerts, "records are waiting to be pasted at a manual DNS target")
+		row.Alerts = append(row.Alerts, "有手動目標在等你把記錄貼進域名")
 	}
 	if !c.Last.At.IsZero() && !c.Last.Manual && !c.Last.Verified {
-		row.Alerts = append(row.Alerts, "最近一次發布無法從外部讀回驗證")
+		row.Alerts = append(row.Alerts, "名單寫進去了，但從外面讀不回來（可能域名還沒生效，或 DNS 有快取）")
 	}
 	if row.All > 0 && row.OK == 0 {
 		row.Alerts = append(row.Alerts, "沒有任何節點通過檢查")
+	}
+	row.Steps = s.steps(st, c, row)
+	row.Next = nextStep(row.Steps)
+	for _, st := range row.Steps {
+		if !st.Done {
+			row.Left++
+		}
 	}
 	return row
 }
@@ -436,7 +449,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request, _ *auth.Sessi
 		rows = append(rows, s.clusterRow(st, c))
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].C.Name < rows[j].C.Name })
-	s.render(w, r, "dashboard.html", page{Title: "集群", Flash: r.URL.Query().Get("ok"), Data: rows}, http.StatusOK)
+	s.render(w, r, "dashboard.html", page{Title: "渠道", Flash: r.URL.Query().Get("ok"), Data: rows}, http.StatusOK)
 }
 
 type clusterPageData struct {
@@ -471,17 +484,17 @@ type createdData struct {
 }
 
 func (s *Server) clusterNewForm(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
-	s.render(w, r, "cluster_new.html", page{Title: "新增集群"}, http.StatusOK)
+	s.render(w, r, "cluster_new.html", page{Title: "新增渠道"}, http.StatusOK)
 }
 
 var clusterNameRe = regexp.MustCompile(`^[^<>"'&\x00-\x1f]{1,60}$`)
 
 func (s *Server) clusterCreate(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
 	fail := func(msg string) {
-		s.render(w, r, "cluster_new.html", page{Title: "新增集群", Error: msg}, http.StatusBadRequest)
+		s.render(w, r, "cluster_new.html", page{Title: "新增渠道", Error: msg}, http.StatusBadRequest)
 	}
 	if s.Vault.Sealed() {
-		fail("保險庫是封存狀態；請先解封，新集群需要把金鑰存進去。")
+		fail("保險庫是上鎖狀態；請先解鎖，新渠道需要把金鑰存進去。")
 		return
 	}
 	name := strings.TrimSpace(r.FormValue("name"))
@@ -495,13 +508,25 @@ func (s *Server) clusterCreate(w http.ResponseWriter, r *http.Request, _ *auth.S
 		fail("有效期與續期天數必須是數字。")
 		return
 	}
+	provider := r.FormValue("provider")
+	zone := strings.ToLower(strings.TrimSpace(r.FormValue("zone")))
+	dnsName := strings.ToLower(strings.TrimSpace(r.FormValue("dns_name")))
+	credRef := strings.TrimSpace(r.FormValue("cred_ref"))
+	if provider != "manual" && credRef == "" {
+		credRef = "main"
+	}
+	if provider == "cloudflare" && zone == "" {
+		z, zerr := s.detectZone(r.Context(), credRef, dnsName)
+		if zerr != nil {
+			fail(zerr.Error())
+			return
+		}
+		zone = z
+	}
 	c := &store.Cluster{
 		ID: store.NewID(), Name: name, Origin: strings.TrimSpace(r.FormValue("origin")),
 		ValidDays: valid, RenewBeforeDays: renew, Created: s.now(),
-		Targets: []store.DNSTarget{{
-			Provider: r.FormValue("provider"), Zone: strings.ToLower(strings.TrimSpace(r.FormValue("zone"))),
-			Name: strings.ToLower(strings.TrimSpace(r.FormValue("dns_name"))), CredRef: strings.TrimSpace(r.FormValue("cred_ref")),
-		}},
+		Targets: []store.DNSTarget{{Provider: provider, Zone: zone, Name: dnsName, CredRef: credRef}},
 	}
 	key, err := shieldlist.GenerateKey()
 	if err != nil {
@@ -533,7 +558,7 @@ func (s *Server) clusterCreate(w http.ResponseWriter, r *http.Request, _ *auth.S
 	}
 	s.log(r, "cluster-create", "cluster="+c.Name, true)
 	// The only time the node secret is shown. Afterwards it can only be read on the server itself.
-	s.render(w, r, "cluster_created.html", page{Title: "集群已建立", Data: createdData{Cluster: c, NodeSecret: secret, PublicKey: c.PublicKey}}, http.StatusOK)
+	s.render(w, r, "cluster_created.html", page{Title: "渠道已建立", Data: createdData{Cluster: c, NodeSecret: secret, PublicKey: c.PublicKey}}, http.StatusOK)
 }
 
 // newSecret returns 32 bytes from the system's secure random source, as hex. It is the shared secret that
@@ -560,7 +585,7 @@ func (s *Server) nodeAdd(w http.ResponseWriter, r *http.Request, _ *auth.Session
 		Enabled: true, Created: s.now()}
 	err := s.Store.Mutate(func(st *store.State) error {
 		if st.Cluster(id) == nil {
-			return fmt.Errorf("沒有這個集群")
+			return fmt.Errorf("沒有這個渠道")
 		}
 		st.Nodes = append(st.Nodes, n)
 		return nil
@@ -572,7 +597,7 @@ func (s *Server) nodeAdd(w http.ResponseWriter, r *http.Request, _ *auth.Session
 	}
 	s.log(r, "node-add", fmt.Sprintf("cluster=%s node=%s %s", id, safe(n.Name), n.Addr()), true)
 	go s.Mon.ProbeAll(context.Background(), []*store.Node{n})
-	s.back(w, r, id, "節點已新增。通過檢查後會加入發布的名單。")
+	s.back(w, r, id, "節點已加入。連續通過幾次檢查後，會自動進入名單。")
 }
 
 func (s *Server) mutateNode(w http.ResponseWriter, r *http.Request, action string, fn func(*store.Node) error) {
@@ -581,7 +606,7 @@ func (s *Server) mutateNode(w http.ResponseWriter, r *http.Request, action strin
 	err := s.Store.Mutate(func(st *store.State) error {
 		n := st.Node(nid)
 		if n == nil || n.ClusterID != id {
-			return fmt.Errorf("這個集群裡沒有這個節點")
+			return fmt.Errorf("這個渠道裡沒有這個節點")
 		}
 		label = n.Addr()
 		return fn(n)
@@ -622,7 +647,7 @@ func (s *Server) nodeDelete(w http.ResponseWriter, r *http.Request, _ *auth.Sess
 				return nil
 			}
 		}
-		return fmt.Errorf("這個集群裡沒有這個節點")
+		return fmt.Errorf("這個渠道裡沒有這個節點")
 	})
 	if err != nil {
 		s.renderCluster(w, r, id, "", err.Error(), http.StatusBadRequest)
@@ -630,7 +655,7 @@ func (s *Server) nodeDelete(w http.ResponseWriter, r *http.Request, _ *auth.Sess
 	}
 	s.Mon.Forget(nid)
 	s.log(r, "node-delete", fmt.Sprintf("cluster=%s node=%s", id, label), true)
-	s.back(w, r, id, "節點已移除。請發布一次，把它從名單中拿掉。")
+	s.back(w, r, id, "節點已刪除。請再「立即更新名單」一次，把它從名單裡拿掉。")
 }
 
 func (s *Server) probeNow(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
@@ -643,7 +668,7 @@ func (s *Server) probeNow(w http.ResponseWriter, r *http.Request, _ *auth.Sessio
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	s.Mon.ProbeAll(ctx, st.NodesOf(id))
-	s.back(w, r, id, "已探測。")
+	s.back(w, r, id, "已檢查完。")
 }
 
 // ---------------------------------------------------------------- publishing
@@ -661,17 +686,17 @@ func (s *Server) publishNow(w http.ResponseWriter, r *http.Request, sess *auth.S
 	defer cancel()
 	res, err := s.Pub.Publish(ctx, id, nodes, sess.User, s.clientIP(r), "published by hand")
 	if err != nil {
-		s.renderCluster(w, r, id, "", "發布失敗："+err.Error(), http.StatusBadGateway)
+		s.renderCluster(w, r, id, "", "更新名單失敗："+err.Error(), http.StatusBadGateway)
 		return
 	}
 	if !c.AutoPublish {
 		s.Store.Mutate(func(st *store.State) error { st.Cluster(id).AutoPublish = true; return nil })
 	}
-	msg := fmt.Sprintf("已發布 %d 個節點。", len(res.Nodes))
+	msg := fmt.Sprintf("名單已更新，現在有 %d 個節點。", len(res.Nodes))
 	if res.Manual {
 		msg += " Some targets are manual: paste the records shown below."
 	}
-	s.back(w, r, id, msg+" 自動發布現在已開啟。")
+	s.back(w, r, id, msg+" 自動更新已開啟，之後面板會自己維護。")
 }
 
 func (s *Server) autoToggle(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
@@ -680,10 +705,10 @@ func (s *Server) autoToggle(w http.ResponseWriter, r *http.Request, _ *auth.Sess
 	err := s.Store.Mutate(func(st *store.State) error {
 		c := st.Cluster(id)
 		if c == nil {
-			return fmt.Errorf("沒有這個集群")
+			return fmt.Errorf("沒有這個渠道")
 		}
 		if on && c.Last.At.IsZero() {
-			return fmt.Errorf("請先手動發布一次，確認送出去的內容")
+			return fmt.Errorf("請先手動「立即更新名單」一次，確認寫進去的內容沒問題，再開自動更新")
 		}
 		c.AutoPublish = on
 		return nil
@@ -700,10 +725,21 @@ func (s *Server) targetAdd(w http.ResponseWriter, r *http.Request, _ *auth.Sessi
 	id := r.PathValue("id")
 	t := store.DNSTarget{Provider: r.FormValue("provider"), Zone: strings.ToLower(strings.TrimSpace(r.FormValue("zone"))),
 		Name: strings.ToLower(strings.TrimSpace(r.FormValue("dns_name"))), CredRef: strings.TrimSpace(r.FormValue("cred_ref"))}
+	if t.Provider != "manual" && t.CredRef == "" {
+		t.CredRef = "main"
+	}
+	if t.Provider == "cloudflare" && t.Zone == "" { // Cloudflare: the panel finds the domain itself, no zone or id to type
+		zone, zerr := s.detectZone(r.Context(), t.CredRef, t.Name)
+		if zerr != nil {
+			s.renderCluster(w, r, id, "", zerr.Error(), http.StatusBadRequest)
+			return
+		}
+		t.Zone = zone
+	}
 	err := s.Store.Mutate(func(st *store.State) error {
 		c := st.Cluster(id)
 		if c == nil {
-			return fmt.Errorf("沒有這個集群")
+			return fmt.Errorf("沒有這個渠道")
 		}
 		c.Targets = append(c.Targets, t)
 		return nil
@@ -713,7 +749,7 @@ func (s *Server) targetAdd(w http.ResponseWriter, r *http.Request, _ *auth.Sessi
 		return
 	}
 	s.log(r, "target-add", fmt.Sprintf("cluster=%s %s %s", id, t.Provider, t.Name), true)
-	s.back(w, r, id, "DNS 目標已新增。請發布一次，把名單送過去。")
+	s.back(w, r, id, "域名已加入。請「立即更新名單」一次，把名單寫過去。")
 }
 
 func (s *Server) targetDelete(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
@@ -742,56 +778,22 @@ var (
 	credField = map[string]bool{"api_key": true, "api_secret": true, "api_token": true, "access_key_id": true, "access_key_secret": true}
 )
 
-func (s *Server) secretsPage(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
-	var names []string
-	if !s.Vault.Sealed() {
-		all, _ := s.Vault.Names()
-		for _, n := range all {
-			if strings.HasPrefix(n, "dns/") {
-				names = append(names, n)
-			}
-		}
-	}
-	s.render(w, r, "secrets.html", page{Title: "DNS 憑證", Flash: r.URL.Query().Get("ok"), Data: names}, http.StatusOK)
-}
-
-func (s *Server) secretSet(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
-	ref, field, value := strings.TrimSpace(r.FormValue("ref")), r.FormValue("field"), r.FormValue("value")
-	fail := func(msg string) {
-		s.render(w, r, "secrets.html", page{Title: "DNS 憑證", Error: msg}, http.StatusBadRequest)
-	}
-	if s.Vault.Sealed() {
-		fail("保險庫是封存狀態。")
-		return
-	}
-	if !credRefRe.MatchString(ref) || !credField[field] || value == "" || len(value) > 4096 {
-		fail("請填一個簡短的名稱（a-z、0-9、- _），選擇欄位，並填入值。")
-		return
-	}
-	if err := s.Vault.Set("dns/"+ref+"/"+field, value); err != nil {
-		fail(err.Error())
-		return
-	}
-	s.log(r, "secret-set", "dns/"+ref+"/"+field, true) // the value is never logged
-	http.Redirect(w, r, "/secrets?ok="+url.QueryEscape("已儲存。這個值之後不會再顯示。"), http.StatusSeeOther)
-}
-
 func (s *Server) unsealForm(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
-	s.render(w, r, "unseal.html", page{Title: "解封"}, http.StatusOK)
+	s.render(w, r, "unseal.html", page{Title: "解鎖"}, http.StatusOK)
 }
 
 func (s *Server) unsealSubmit(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
 	if !s.lim.allow("unseal:"+s.clientIP(r), s.now()) {
-		s.render(w, r, "unseal.html", page{Title: "解封", Error: "嘗試次數過多。"}, http.StatusTooManyRequests)
+		s.render(w, r, "unseal.html", page{Title: "解鎖", Error: "嘗試次數過多。"}, http.StatusTooManyRequests)
 		return
 	}
 	if err := s.Vault.Unseal(r.FormValue("passphrase")); err != nil {
 		s.log(r, "unseal", "failed", false)
-		s.render(w, r, "unseal.html", page{Title: "解封", Error: "這個口令打不開保險庫。"}, http.StatusUnauthorized)
+		s.render(w, r, "unseal.html", page{Title: "解鎖", Error: "這個口令打不開保險庫。"}, http.StatusUnauthorized)
 		return
 	}
 	s.log(r, "unseal", "ok", true)
-	http.Redirect(w, r, "/?ok="+url.QueryEscape("保險庫已解封。"), http.StatusSeeOther)
+	http.Redirect(w, r, "/?ok="+url.QueryEscape("保險庫已解鎖。"), http.StatusSeeOther)
 }
 
 func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, _ *auth.Session) {

@@ -150,7 +150,7 @@ func (s *Server) sshOp(w http.ResponseWriter, r *http.Request, action string, ti
 		return
 	}
 	if s.Vault.Sealed() {
-		s.renderNode(w, r, nodePageData{Cluster: c, Node: n}, "", "保險庫是封存狀態；面板的 SSH 金鑰目前無法使用。", http.StatusServiceUnavailable)
+		s.renderNode(w, r, nodePageData{Cluster: c, Node: n}, "", "保險庫是上鎖狀態；面板的 SSH 金鑰目前無法使用。", http.StatusServiceUnavailable)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
@@ -248,7 +248,7 @@ func (s *Server) guardLastHealthy(n store.Node) error {
 		}
 	}
 	if healthy == 0 {
-		return fmt.Errorf("%s 是它所在集群裡唯一健康的節點；升級它會讓玩家無處可連", n.Addr())
+		return fmt.Errorf("%s 是它所在渠道裡唯一健康的節點；升級它會讓玩家無處可連", n.Addr())
 	}
 	return nil
 }
@@ -269,7 +269,7 @@ func (s *Server) upgradeAll(w http.ResponseWriter, r *http.Request, sess *auth.S
 		}
 	}
 	if s.Ops == nil || len(targets) == 0 {
-		s.renderCluster(w, r, id, "", "這個集群還沒有任何節點設定好 SSH 管理。", http.StatusBadRequest)
+		s.renderCluster(w, r, id, "", "這個渠道還沒有任何節點設定好 SSH 管理。", http.StatusBadRequest)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Minute)
@@ -304,7 +304,7 @@ type sshPageData struct {
 
 func (s *Server) panelKey() (pub string, has bool, err error) {
 	if s.Vault.Sealed() {
-		return "", false, fmt.Errorf("保險庫是封存狀態")
+		return "", false, fmt.Errorf("保險庫是上鎖狀態")
 	}
 	pem, ok, err := s.Vault.Get(SSHKeyName)
 	if err != nil || !ok {

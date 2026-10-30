@@ -276,7 +276,7 @@ func TestHostKeyIsShownFirstAndOnlyStoredWhenConfirmed(t *testing.T) {
 	a.post(base+"/ssh-settings", url.Values{"csrf": {a.csrf()}, "ssh_user": {"gamec-ops"}}, nil)
 
 	st, body, _ := a.post(base+"/hostkey", url.Values{"csrf": {a.csrf()}, "action": {"fetch"}}, nil)
-	if st != 200 || !strings.Contains(body, fp1) || !strings.Contains(body, "信任這把金鑰") {
+	if st != 200 || !strings.Contains(body, fp1) || !strings.Contains(body, "信任它") {
 		t.Fatalf("%d", st)
 	}
 	if e.st.Snapshot().Node(n.ID).HostKey != "" {
@@ -307,7 +307,7 @@ func TestAChangedKeyIsFlaggedLoudly(t *testing.T) {
 	e.setupSSH(a, n)
 	*e.hostKey = fp2
 	_, body, _ := a.post(e.base(n)+"/hostkey", url.Values{"csrf": {a.csrf()}, "action": {"fetch"}}, nil)
-	if !strings.Contains(body, "和你之前確認的金鑰不一樣") {
+	if !strings.Contains(body, "和你之前確認的指紋不一樣") {
 		t.Fatal("a changed host key was shown like a new one")
 	}
 	if e.st.Snapshot().Node(n.ID).HostKey != fp1 {
@@ -374,7 +374,7 @@ func TestSSHNeedsAnUnsealedVault(t *testing.T) {
 	e.setupSSH(a, n)
 	e.vault.Seal()
 	st, body, _ := a.post(e.base(n)+"/check", url.Values{"csrf": {a.csrf()}}, nil)
-	if st != http.StatusServiceUnavailable || !strings.Contains(body, "封存") || len(e.f.cmds) != 0 {
+	if st != http.StatusServiceUnavailable || !strings.Contains(body, "上鎖") || len(e.f.cmds) != 0 {
 		t.Fatalf("%d", st)
 	}
 }

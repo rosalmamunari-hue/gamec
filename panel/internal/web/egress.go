@@ -145,7 +145,7 @@ func allowedDestinations(st store.State) []string {
 func (s *Server) egressScript(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
 	pub, has, err := s.panelKey()
 	if err != nil || !has {
-		s.renderEgress(w, r, egressPageData{}, "", "面板還沒有 SSH 金鑰（請執行 `panel ssh-keygen`），或保險庫是封存狀態。", http.StatusBadRequest)
+		s.renderEgress(w, r, egressPageData{}, "", "面板還沒有 SSH 金鑰（請執行 `panel ssh-keygen`），或保險庫是上鎖狀態。", http.StatusBadRequest)
 		return
 	}
 	script, err := ops.PrepareJumpScript(pub, allowedDestinations(s.Store.Snapshot()), strings.TrimSpace(r.FormValue("from")))

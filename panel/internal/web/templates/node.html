@@ -2,42 +2,43 @@
 {{$p := .}}
 {{$c := .Data.Cluster}}
 {{$n := .Data.Node}}
-<p><a href="/cluster/{{$c.ID}}">&larr; {{$c.Name}}</a></p>
+<p><a href="/cluster/{{$c.ID}}">&larr; 回到 {{$c.Name}}</a></p>
 
 <section class="card">
-  <h2>{{$n.Name}} <span class="muted"><code>{{$n.Host}}:{{$n.Port}}</code></span></h2>
-  <p><span class="dot {{.Data.View.Status}}"></span> {{.Data.View.Detail}}{{if .Data.View.Latency}} &middot; {{.Data.View.Latency}}{{end}}</p>
+  <div class="section-head"><h2>{{$n.Name}} <code>{{$n.Host}}:{{$n.Port}}</code></h2></div>
+  <p><span class="dot {{.Data.View.Status}}"></span>{{.Data.View.Detail}}{{if .Data.View.Latency}} · {{.Data.View.Latency}}{{end}}</p>
 </section>
 
 <section class="card">
-  <h2>SSH 設定</h2>
-  <p class="muted">面板用自己的金鑰以受限帳號登入，只能執行 <code>gamec-nodectl</code>。每台伺服器要先用 <a href="/ssh">SSH 管理</a> 頁的腳本準備一次。</p>
+  <h2>遠端登入設定</h2>
+  <p class="muted small">面板用自己的密鑰，以權限很小的帳號登入這台伺服器，只能執行 <code>gamec-nodectl</code>。伺服器要先按「<a href="/ssh">伺服器管理</a>」頁的腳本準備好。</p>
   <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/ssh-settings" class="stack">
     <input type="hidden" name="csrf" value="{{$p.CSRF}}">
-    <label>帳號 <input name="ssh_user" value="{{$n.SSHUser}}" placeholder="gamec-ops"></label>
-    <label>SSH 連接埠（留空 = 22） <input name="ssh_port" value="{{if $n.SSHPort}}{{$n.SSHPort}}{{end}}" size="6"></label>
-    <label>服務名稱（留空 = gamec-edge） <input name="unit" value="{{$n.Unit}}" placeholder="gamec-edge"></label>
+    <label>帳號 <span class="hint">一般是 <code>gamec-ops</code>。</span><input name="ssh_user" value="{{$n.SSHUser}}" placeholder="gamec-ops"></label>
+    <label>SSH 埠 <span class="hint">留空就是 22。</span><input name="ssh_port" value="{{if $n.SSHPort}}{{$n.SSHPort}}{{end}}" size="6"></label>
+    <label>服務名稱 <span class="hint">留空就是 gamec-edge。同一台機器跑多個時才要改。</span><input name="unit" value="{{$n.Unit}}" placeholder="gamec-edge"></label>
     <button>儲存</button>
   </form>
 </section>
 
 {{if $n.SSHUser}}
 <section class="card">
-  <h2>主機金鑰</h2>
-  {{if $n.HostKey}}<p>已確認：<code class="wrap">{{$n.HostKey}}</code></p>{{else}}<p class="alert">尚未確認。在你確認它的金鑰之前，不會向這台伺服器送出任何東西。</p>{{end}}
+  <h2>確認這台伺服器是真的</h2>
+  <p class="muted small">第一次連線前，要核對伺服器的「指紋」，確保連到的是你的機器、沒有人在中間攔截。核對對了才點信任。</p>
+  {{if $n.HostKey}}<p class="okc">&#10003; 已確認：<code class="wrap">{{$n.HostKey}}</code></p>{{else}}<p class="alert">還沒確認。確認之前，面板不會向這台伺服器送出任何東西。</p>{{end}}
   {{if .Data.Fingerprint}}
-    {{if .Data.KeyChanged}}<p class="alert"><b>這和你之前確認的金鑰不一樣。</b>要麼伺服器重新安裝過，要麼有人在攔截連線。只有確定是重新安裝時才繼續。</p>{{end}}
-    <p>伺服器出示的金鑰（<code>{{.Data.KeyType}}</code>）：</p>
+    {{if .Data.KeyChanged}}<div class="banner err"><b>這和你之前確認的指紋不一樣！</b>可能是伺服器重裝過，也可能有人在攔截連線。只有確定是你重裝的才繼續。</div>{{end}}
+    <p>這台伺服器出示的指紋（<code>{{.Data.KeyType}}</code>）：</p>
     <p><code class="wrap">{{.Data.Fingerprint}}</code></p>
-    <p class="muted">請和在伺服器上執行 <code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</code> 的輸出核對（準備腳本也會印出來）。完全一致才確認。</p>
+    <p class="muted small">請登入那台伺服器執行 <code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</code>（準備腳本也會印出來），看看是不是一模一樣。一樣才點下面。</p>
     <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/hostkey" class="inline">
       <input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="action" value="trust"><input type="hidden" name="fingerprint" value="{{.Data.Fingerprint}}">
-      <button class="primary">一致：信任這把金鑰</button>
+      <button class="primary">一模一樣，信任它</button>
     </form>
   {{else}}
     <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/hostkey" class="inline">
       <input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="action" value="fetch">
-      <button>{{if $n.HostKey}}重新檢查金鑰{{else}}取得伺服器金鑰{{end}}</button>
+      <button>{{if $n.HostKey}}重新檢查指紋{{else}}取得伺服器指紋{{end}}</button>
     </form>
   {{end}}
 </section>
@@ -45,37 +46,38 @@
 
 {{if and $n.SSHUser $n.HostKey}}
 <section class="card">
-  <h2>通過 SSH 管理</h2>
-  <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/check" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button>查看狀態與日誌</button></form>
+  <h2>遠端管理</h2>
+  <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/check" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button>查看狀態和日誌</button></form>
 
   {{with .Data.Status}}
   <table>
-    <tr><th>服務</th><td>{{.Unit}}：{{.Active}}（{{.Sub}}），自 {{.Since}}</td></tr>
-    <tr><th>程式</th><td><code class="wrap">{{.SHA256}}</code>{{if .HasBackup}} &middot; 已保留上一版{{end}}</td></tr>
+    <tr><th>服務</th><td>{{.Unit}}：{{.Active}}（{{.Sub}}），從 {{.Since}} 開始</td></tr>
+    <tr><th>程式版本指紋</th><td><code class="wrap">{{.SHA256}}</code>{{if .HasBackup}} · 還留著上一版，可退回{{end}}</td></tr>
     <tr><th>記憶體／檔案／執行緒</th><td>{{.RSSKB}} kB / {{.FDs}} / {{.Threads}}</td></tr>
     <tr><th>伺服器</th><td>負載 {{.Load1}}，可用記憶體 {{.MemAvail}} MB</td></tr>
-    <tr><th>nodectl</th><td>版本 {{.Version}}</td></tr>
+    <tr><th>管理工具</th><td>版本 {{.Version}}</td></tr>
   </table>
   {{end}}
   {{if .Data.Logs}}<pre>{{.Data.Logs}}</pre>{{end}}
   {{if .Data.Result}}<p>{{.Data.Result}}</p>{{end}}
 
-  <h3>服務</h3>
+  <h3>啟動／停止</h3>
   {{range $verb := list "restart" "start" "stop"}}
   <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/ctl" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="verb" value="{{$verb}}"><button{{if eq $verb "stop"}} class="danger"{{end}}>{{if eq $verb "restart"}}重啟{{else if eq $verb "start"}}啟動{{else}}停止{{end}}</button></form>
   {{end}}
   <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/stop-for" class="inline">
     <input type="hidden" name="csrf" value="{{$p.CSRF}}">
-    <input name="minutes" value="1" size="3" aria-label="minutes">
-    <button title="停止服務，時間到節點會自己再啟動">停止指定分鐘數，然後再啟動</button>
+    <input name="minutes" value="1" size="3" aria-label="分鐘">
+    <button title="先停掉服務，時間到它會自己再啟動">停止 N 分鐘後自動啟動</button>
   </form>
+  <p class="muted small">測試故障切換很方便：停一分鐘，玩家會自動換到別的節點，時間到節點自己回來。</p>
 
-  <h3>升級</h3>
-  <p class="muted">下載該版本，用發布的校驗碼檢查，傳送、安裝，並要求節點通過檢查。若沒通過，會自動換回上一個版本。</p>
+  <h3>升級程式</h3>
+  <p class="muted small">面板會下載指定版本、用發布的校驗碼檢查沒被改過、傳到伺服器安裝，並要求節點通過檢查。沒通過就自動換回上一版。</p>
   <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/upgrade" class="inline">
     <input type="hidden" name="csrf" value="{{$p.CSRF}}">
-    <input name="tag" placeholder="v0.2.0" size="10" required>
-    <button>升級這個節點</button>
+    <input name="tag" placeholder="版本，如 v0.2.0" size="14" required>
+    <button>升級這台</button>
   </form>
 </section>
 {{end}}

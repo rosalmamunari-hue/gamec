@@ -3,27 +3,27 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{.Title}} - gamec panel</title>
+<title>{{.Title}} - gamec 面板</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <header>
-  <a class="brand" href="/">gamec panel</a>
+  <a class="brand" href="/">gamec 面板</a>
   {{if .User}}
   <nav>
-    <a href="/">集群</a>
-    {{if .Admin}}<a href="/secrets">DNS 憑證</a><a href="/ssh">SSH 管理</a><a href="/egress">出口跳板機</a>{{end}}
-    <a href="/audit">稽核日誌</a>
-    <form method="post" action="/logout" class="inline">
+    <a href="/">渠道</a>
+    {{if .Admin}}<a href="/secrets">域名授權</a><a href="/ssh">伺服器管理</a><a href="/egress">出口代理</a>{{end}}
+    <a href="/audit">操作紀錄</a>
+    <form method="post" action="/logout">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <span class="who">{{.User}}{{if .Admin}} （管理員）{{else}} （唯讀）{{end}}</span>
+      <span class="who">{{.User}}{{if .Admin}}（管理員）{{else}}（唯讀）{{end}}</span>
       <button class="link">登出</button>
     </form>
   </nav>
   {{end}}
 </header>
 <main>
-{{if .Sealed}}<div class="banner warn">保險庫目前是<b>封存</b>狀態：無法簽名或發布，自動續期也已暫停。{{if .Admin}} <a href="/unseal">前往解封</a>。{{end}}</div>{{end}}
+{{if .Sealed}}<div class="banner warn"><b>保險庫現在是上鎖的。</b>在解鎖之前，面板不能更新名單，自動續期也會暫停。{{if .Admin}} <a href="/unseal">馬上解鎖</a>{{end}}</div>{{end}}
 {{if .Flash}}<div class="banner ok">{{.Flash}}</div>{{end}}
 {{if .Error}}<div class="banner err">{{.Error}}</div>{{end}}
 <h1>{{.Title}}</h1>

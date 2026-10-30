@@ -1,12 +1,12 @@
 {{template "head" .}}
-<div class="banner warn"><b>請立刻複製 token 密鑰。</b>它只會在這一頁顯示。之後只能在伺服器上用 <code>panel get-secret</code> 讀取。</div>
+<div class="banner warn"><b>現在就把下面的「連線密鑰」複製存好。</b>它只會在這一頁出現一次，之後只能在面板所在的伺服器上用 <code>panel get-secret</code> 讀。</div>
 <section class="card">
   <dl>
-    <dt>集群</dt><dd>{{.Data.Cluster.Name}}</dd>
-    <dt>Token 密鑰（交給此集群的每個節點，作為 <code>-secret</code> 參數）</dt><dd><code class="wrap">{{.Data.NodeSecret}}</code></dd>
-    <dt>公鑰（給 App 使用）</dt><dd><code class="wrap">{{.Data.PublicKey}}</code></dd>
+    <dt>渠道</dt><dd>{{.Data.Cluster.Name}}</dd>
+    <dt>連線密鑰（給這個渠道的每個節點，啟動時用 <code>-secret</code> 參數帶上）</dt><dd><code class="wrap">{{.Data.NodeSecret}}</code></dd>
+    <dt>公鑰（填進 App；公開的，不是祕密）</dt><dd><code class="wrap">{{.Data.PublicKey}}</code></dd>
   </dl>
-  <p>下一步：新增節點、設定 DNS 憑證，然後手動發布一次。</p>
-  <p><a class="btn" href="/cluster/{{.Data.Cluster.ID}}">開啟集群</a></p>
+  <p>接下來：加節點、貼 Cloudflare 令牌、更新一次名單。渠道頁上有一步一步的清單帶你做。</p>
+  <p><a class="btn primary" href="/cluster/{{.Data.Cluster.ID}}">打開這個渠道</a></p>
 </section>
 {{template "foot" .}}

@@ -1,25 +1,28 @@
 {{template "head" .}}
+<p class="lead">讓面板可以遠端幫你管節點：看狀態和日誌、啟動／停止／重啟、升級程式、出問題一鍵退回。全程不需要 root 密碼。</p>
 <section class="card">
-  <p class="muted">面板用自己的一把金鑰，通過 SSH 管理節點，使用的是受限帳號，只能執行 <code>gamec-nodectl</code>（查看狀態、日誌、啟動／停止／重啟、安裝經過校驗的版本、回滾）。完全不需要 root 密碼。</p>
+  <p class="muted small">做法：面板有自己的一把密鑰，在每台節點伺服器上建一個權限很小的帳號，這個帳號只能執行一個叫 <code>gamec-nodectl</code> 的小工具，做不了別的事。</p>
   {{if .Data.HasKey}}
     <h2>面板的公鑰</h2>
+    <p class="muted small">下面準備腳本裡已經包含它，不用自己貼。</p>
     <p><code class="wrap">{{.Data.PublicLine}}</code></p>
   {{else}}
-    <p class="alert">面板還沒有 SSH 金鑰。請在面板所在的伺服器上執行 <code>panel ssh-keygen</code> 建立。</p>
+    <p class="alert">面板還沒有自己的密鑰。請在面板所在伺服器上執行一次 <code>panel ssh-keygen</code>。</p>
   {{end}}
 </section>
 
 {{if .Data.HasKey}}
 <section class="card">
-  <h2>準備伺服器</h2>
-  <p>產生一份腳本，請你先閱讀，再在每個節點的伺服器上以 <b>root 執行一次</b>。它會建立受限帳號、只允許面板的金鑰、安裝 <code>gamec-nodectl</code>（會用校驗碼檢查），並加入那一條 sudo 規則。</p>
+  <h2>第一步：準備節點伺服器</h2>
+  <p>點下面按鈕會生成一段腳本。<b>請先看一遍，再到每台節點伺服器上用 root 執行一次</b>。它會：建立受限帳號、只允許面板的密鑰登入、裝好 <code>gamec-nodectl</code>（會用校驗碼檢查沒被改過）、加一條只允許執行它的權限規則。</p>
   <form method="post" action="/ssh" class="stack">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
-    <label>包含 nodectl 的版本 <input name="tag" placeholder="v0.2.0" required></label>
-    <label>只允許從這個位址登入（面板自己的位址；建議填寫） <input name="from" placeholder="203.0.113.9"></label>
-    <button class="primary">產生腳本</button>
+    <label>用哪個版本的工具 <span class="hint">填發布版本號，比如 <code>v0.2.0</code>。</span><input name="tag" placeholder="v0.2.0" required></label>
+    <label>只允許從這個位址登入（建議填） <span class="hint">填面板自己的 IP，這樣別的地方即使拿到密鑰也登不進去。</span><input name="from" placeholder="203.0.113.9"></label>
+    <button class="primary">生成腳本</button>
   </form>
-  {{if .Data.Script}}<h2>腳本</h2><pre>{{.Data.Script}}</pre>{{end}}
+  {{if .Data.Script}}<h3>腳本</h3><pre>{{.Data.Script}}</pre>
+  <p class="muted small">跑完後，到渠道頁的節點「管理」裡填帳號，再確認伺服器指紋即可。</p>{{end}}
 </section>
 {{end}}
 {{template "foot" .}}
