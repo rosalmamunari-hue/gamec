@@ -48,16 +48,28 @@ type Log struct {
 // new entries are not silently appended to a tampered history.
 func Open(path string) (*Log, error) {
 	l := &Log{path: path}
-	if _, err := os.Stat(path); err == nil {
-		_, last, err := verify(path)
-		if err != nil {
-			return nil, fmt.Errorf("audit log is damaged: %w", err)
-		}
-		l.last = last
-		if fi, err := os.Stat(path); err == nil {
-			l.size = fi.Size()
-		}
+	f, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return l, nil
 	}
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	// Under the lock, so the hash and the size describe the same entries even if the server (or a
+	// command) appends at this moment.
+	if err := flock.Lock(f); err != nil {
+		return nil, err
+	}
+	_, last, err := verifyFrom(f)
+	if err != nil {
+		return nil, fmt.Errorf("audit log is damaged: %w", err)
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	l.last, l.size = last, fi.Size()
 	return l, nil
 }
 
@@ -131,7 +143,11 @@ func verify(path string) (n int, last string, err error) {
 		return 0, "", err
 	}
 	defer f.Close()
-	sc := bufio.NewScanner(f)
+	return verifyFrom(f)
+}
+
+func verifyFrom(r io.Reader) (n int, last string, err error) {
+	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
 	prev := ""
 	for sc.Scan() {

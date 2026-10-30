@@ -70,6 +70,10 @@ type Server struct {
 
 const cookieName = "gc_session"
 
+// deviceCookie marks a browser the user has logged in from, so a lockout someone else caused does not keep
+// them out (see auth.AuthenticateDevice). Sent to /login only.
+const deviceCookie = "gc_device"
+
 func (s *Server) now() time.Time {
 	if s.Now != nil {
 		return s.Now()
@@ -334,7 +338,11 @@ func (s *Server) loginSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimSpace(r.FormValue("user"))
-	u, err := s.Users.Authenticate(name, r.FormValue("password"), r.FormValue("code"), s.now())
+	var device string
+	if c, err := r.Cookie(deviceCookie); err == nil {
+		device = c.Value
+	}
+	u, fresh, err := s.Users.AuthenticateDevice(name, r.FormValue("password"), r.FormValue("code"), device, s.now())
 	if err != nil {
 		s.log(r, "login-failed", "user="+safe(name), false)
 		// the same message for every failure, locked accounts included
@@ -344,6 +352,8 @@ func (s *Server) loginSubmit(w http.ResponseWriter, r *http.Request) {
 	sess := s.Sessions.Create(u.Name, u.Role, s.now())
 	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: sess.Token, Path: "/", HttpOnly: true,
 		Secure: s.Secure, SameSite: http.SameSiteStrictMode, MaxAge: 12 * 3600})
+	http.SetCookie(w, &http.Cookie{Name: deviceCookie, Value: fresh, Path: "/login", HttpOnly: true,
+		Secure: s.Secure, SameSite: http.SameSiteStrictMode, MaxAge: 180 * 24 * 3600})
 	s.log(r.WithContext(context.WithValue(r.Context(), ctxKey{}, sess)), "login", "", true)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }

@@ -222,8 +222,15 @@ func relay(client, up net.Conn, idle time.Duration) {
 	go func() { pipe(up, client); done <- struct{}{} }()
 	go func() { pipe(client, up); done <- struct{}{} }()
 	<-done
+	// One side has finished sending. Many servers never close their side in answer, so the rest only gets
+	// a short while, whatever the idle timeout, before both are closed.
+	t := time.AfterFunc(halfCloseGrace, func() { client.Close(); up.Close() })
 	<-done
+	t.Stop()
 }
+
+// halfCloseGrace is how long a relay stays open after one side finished sending, for the reply in flight.
+var halfCloseGrace = 30 * time.Second
 
 func main() {
 	flag.Parse()

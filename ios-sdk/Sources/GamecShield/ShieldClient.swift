@@ -92,9 +92,10 @@ public final class ShieldClient {
     /// Starts the loopback listener and returns the local port. Calling it again while running starts over
     /// (for example back in the foreground, where iOS may have stopped the listener while suspended).
     public func start() throws -> UInt16 {
-        if running { stop() }
+        if running { stop(waitForListener: true) } // so the same fixed port can be bound again
         let params = NWParameters.tcp
         params.requiredInterfaceType = .loopback
+        params.allowLocalEndpointReuse = true
         let l = try NWListener(using: params, on: cfg.localPort == 0 ? .any : NWEndpoint.Port(rawValue: cfg.localPort)!)
 
         let ready = DispatchSemaphore(value: 0)
@@ -135,11 +136,23 @@ public final class ShieldClient {
         return port
     }
 
-    public func stop() {
+    public func stop() { stop(waitForListener: false) }
+
+    /// Cancelling a listener finishes asynchronously; `waitForListener` waits (briefly) until its port is free.
+    private func stop(waitForListener: Bool) {
         running = false
         probeTimer?.cancel()
         watchdogTimer?.cancel()
-        listener?.cancel()
+        if let l = listener {
+            let gone = DispatchSemaphore(value: 0)
+            if waitForListener {
+                l.stateUpdateHandler = { state in
+                    if case .cancelled = state { gone.signal() }
+                }
+            }
+            l.cancel()
+            if waitForListener { _ = gone.wait(timeout: .now() + 2) }
+        }
         queue.async { [self] in
             for c in live { close(c) }
         }

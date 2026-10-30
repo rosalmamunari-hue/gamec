@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha1"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base32"
 	"encoding/base64"
@@ -144,6 +145,8 @@ type User struct {
 	LockedUntil time.Time `json:"locked_until"`
 	LastStep    int64     `json:"last_step"`
 	Created     time.Time `json:"created"`
+	// Devices are hashes of tokens given to browsers this user logged in from; see AuthenticateDevice.
+	Devices []string `json:"devices,omitempty"`
 }
 
 type Users struct {
@@ -214,39 +217,92 @@ func (u *Users) Add(name string, role Role, password string, now time.Time) (str
 }
 
 // Authenticate checks password and TOTP code together. Every failure returns ErrInvalid (or ErrLocked once
-// the account is locked); five failures lock the account for 15 minutes. A locked account still lets in the
-// right password with a fresh code: otherwise anyone who knows the name could keep the admins out (and the
-// vault sealed) with five bad tries every 15 minutes. A wrong guess while locked is refused as before, and
-// learns nothing, because password and code are only ever judged together.
+// the account is locked); five failures lock the account for 15 minutes.
 func (u *Users) Authenticate(name, password, code string, now time.Time) (*User, error) {
+	usr, _, err := u.AuthenticateDevice(name, password, code, "", now)
+	return usr, err
+}
+
+// AuthenticateDevice is Authenticate for a browser that may carry a device token from an earlier login
+// (the "device cookie" defence against lockout abuse). While an account is locked, guesses from anywhere
+// else are refused unread, as before; a browser the user has logged in from is still let in with the right
+// password and code, so nobody who only knows the name can keep the admins out (and the vault sealed). A
+// failure from such a browser while locked costs it its device token, so a stolen one buys a single guess.
+// On success it returns a fresh device token for the browser to keep.
+func (u *Users) AuthenticateDevice(name, password, code, device string, now time.Time) (*User, string, error) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	usr := u.find(name)
 	if usr == nil {
 		CheckPassword(dummyHash, password)
-		return nil, ErrInvalid
+		return nil, "", ErrInvalid
+	}
+	locked := now.Before(usr.LockedUntil)
+	known := usr.hasDevice(device)
+	if locked && !known {
+		CheckPassword(dummyHash, password) // same time as a real check
+		return nil, "", ErrLocked
 	}
 	pwOK := CheckPassword(usr.PwHash, password)
 	step, codeOK := VerifyTOTP(usr.TOTP, code, now)
 	replay := codeOK && step <= usr.LastStep // a code may be used once
-	if now.Before(usr.LockedUntil) && !(pwOK && codeOK && !replay) {
-		return nil, ErrLocked
-	}
 	if !pwOK || !codeOK || replay {
-		usr.Failed++
-		if usr.Failed >= MaxFailures {
+		if locked {
+			usr.dropDevice(device)
+		} else if usr.Failed++; usr.Failed >= MaxFailures {
 			usr.LockedUntil = now.Add(LockDuration)
 			usr.Failed = 0
 		}
 		u.save()
-		return nil, ErrInvalid
+		return nil, "", ErrInvalid
 	}
 	usr.Failed = 0
 	usr.LockedUntil = time.Time{}
 	usr.LastStep = step
+	usr.dropDevice(device) // replaced by a fresh one
+	fresh := token()
+	usr.Devices = append(usr.Devices, deviceHash(fresh))
+	if len(usr.Devices) > MaxDevices {
+		usr.Devices = usr.Devices[len(usr.Devices)-MaxDevices:]
+	}
 	u.save()
 	cp := *usr
-	return &cp, nil
+	return &cp, fresh, nil
+}
+
+// MaxDevices is how many browsers per user are remembered for logging in during a lockout.
+const MaxDevices = 5
+
+func deviceHash(t string) string {
+	h := sha256.Sum256([]byte("gamec-device|" + t))
+	return hex.EncodeToString(h[:])
+}
+
+func (usr *User) hasDevice(t string) bool {
+	if t == "" {
+		return false
+	}
+	h := deviceHash(t)
+	for _, d := range usr.Devices {
+		if subtle.ConstantTimeCompare([]byte(d), []byte(h)) == 1 {
+			return true
+		}
+	}
+	return false
+}
+
+func (usr *User) dropDevice(t string) {
+	if t == "" {
+		return
+	}
+	h := deviceHash(t)
+	kept := usr.Devices[:0]
+	for _, d := range usr.Devices {
+		if d != h {
+			kept = append(kept, d)
+		}
+	}
+	usr.Devices = kept
 }
 
 func (u *Users) SetPassword(name, password string) error {

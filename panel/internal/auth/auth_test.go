@@ -132,17 +132,40 @@ func TestLockoutAfterRepeatedFailures(t *testing.T) {
 	}
 }
 
-// Someone who only knows the name must not be able to keep the real admin out.
-func TestTheRealAdminGetsInDespiteALockout(t *testing.T) {
+// Someone who only knows the name must not be able to keep the real admin out: a browser the admin logged
+// in from before still gets in during a lockout.
+func TestTheRealAdminGetsInFromAKnownBrowserDespiteALockout(t *testing.T) {
 	u, sec, now := newUsers(t)
+	_, device, err := u.AuthenticateDevice("alice", goodPW, code(t, sec, now), "", now)
+	if err != nil || device == "" {
+		t.Fatalf("first login: %q %v", device, err)
+	}
+	now = now.Add(time.Minute)
 	for i := 0; i < MaxFailures; i++ {
 		u.Authenticate("alice", "wrong password!!", "000000", now)
 	}
-	if _, err := u.Authenticate("alice", goodPW, code(t, sec, now), now); err != nil {
-		t.Fatalf("right password and code while locked: %v", err)
+	if _, _, err := u.AuthenticateDevice("alice", goodPW, code(t, sec, now), "", now); err != ErrLocked {
+		t.Fatalf("a browser that never logged in must stay locked out: %v", err)
 	}
-	if _, err := u.Authenticate("alice", "wrong password!!", "000000", now); err != ErrInvalid {
-		t.Fatalf("a success clears the lock, so the next failure is an ordinary one: %v", err)
+	if _, _, err := u.AuthenticateDevice("alice", goodPW, code(t, sec, now), device, now); err != nil {
+		t.Fatalf("the admin's own browser while locked: %v", err)
+	}
+}
+
+// Knowing the password must not turn a lockout into unlimited code guesses: from unknown browsers nothing
+// is even checked, and a known browser loses its token on its first wrong guess.
+func TestALockoutStillStopsGuessing(t *testing.T) {
+	u, sec, now := newUsers(t)
+	_, device, _ := u.AuthenticateDevice("alice", goodPW, code(t, sec, now), "", now)
+	now = now.Add(time.Minute)
+	for i := 0; i < MaxFailures; i++ {
+		u.Authenticate("alice", goodPW, "000000", now)
+	}
+	if _, _, err := u.AuthenticateDevice("alice", goodPW, "000000", device, now); err != ErrInvalid {
+		t.Fatalf("a wrong code from the known browser: %v", err)
+	}
+	if _, _, err := u.AuthenticateDevice("alice", goodPW, code(t, sec, now), device, now); err != ErrLocked {
+		t.Fatalf("the browser should have lost its token after a wrong guess: %v", err)
 	}
 }
 

@@ -230,3 +230,20 @@ func TestAReplyAfterTheClientFinishesSendingGetsThrough(t *testing.T) {
 		t.Fatalf("%q %v", b, err)
 	}
 }
+
+// A server that never closes its side after the client is done must not hold the relay (and its origin
+// connection) until the idle timeout, or forever with -idle-timeout 0.
+func TestAHalfClosedRelayIsClosedAfterTheGrace(t *testing.T) {
+	defer func(g time.Duration) { halfCloseGrace = g }(halfCloseGrace)
+	halfCloseGrace = 200 * time.Millisecond
+	client, origin := pair(t, 0)
+	client.(*net.TCPConn).CloseWrite()
+	origin.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if _, err := io.ReadAll(origin); err != nil { // the EOF passed on by the relay
+		t.Fatal(err)
+	}
+	client.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if _, err := client.Read(make([]byte, 1)); err != io.EOF {
+		t.Fatalf("the relay should have closed after the grace, got %v", err)
+	}
+}

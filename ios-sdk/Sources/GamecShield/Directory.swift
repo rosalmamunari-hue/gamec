@@ -190,11 +190,11 @@ final class NodeDirectory {
 
     private func fetch(_ now: Int64) -> NodeList? {
         lock.lock()
-        let names = names()
+        let candidates = names()
         let floor = max(floorIat, current?.iat ?? 0)
         lock.unlock()
         var found: NodeList?
-        for n in names {
+        for n in candidates {
             let recs = queryTxt?(n) ?? Resolvers.query(cfg: cfg, name: n, minIat: floor)
             guard let f = try? ListVerifier.parse(recs, publicKeyB64: cfg.publicKey, now: now,
                                                   listKeyB64: cfg.listKey) else { continue }
