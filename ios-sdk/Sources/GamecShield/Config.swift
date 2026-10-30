@@ -74,7 +74,7 @@ public struct DiscoveryConfig {
     public let store: ListStore?
 
     public init(name: String, publicKey: String, deviceId: String,
-                dohProviders: [String] = [Doh.cloudflare],
+                dohProviders: [String] = ["https://cloudflare-dns.com/dns-query"],
                 timeout: TimeInterval = 5, refreshInterval: TimeInterval = 600,
                 retryInterval: TimeInterval = 30, tokenMargin: TimeInterval = 60,
                 store: ListStore? = nil) throws {
