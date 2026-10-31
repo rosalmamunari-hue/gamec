@@ -3,162 +3,349 @@
 {{$row := .Data.Row}}
 {{$c := $row.C}}
 
-<p class="lead">{{if $c.Origin}}玩家的流量最后转到 <code>{{$c.Origin}}</code>。{{end}}名单每次有效 {{$c.ValidDays}} 天，到期前 {{$c.RenewBeforeDays}} 天自动续期。</p>
-{{range $row.Alerts}}<div class="alert">&#9888; {{.}}</div>{{end}}
-{{if $row.Note}}<p class="muted">{{$row.Note}}</p>{{end}}
-
-<section class="card">
-  <div class="section-head"><h2>设置进度</h2>{{if $row.Next}}<span class="pill warn">还差 {{$row.Left}} 步</span>{{else}}<span class="pill ok">全部完成</span>{{end}}</div>
-  <ol class="steps">
-    {{range $row.Steps}}
-    <li class="{{if .Done}}done{{else if eq $row.Next.Title .Title}}next{{end}}">
-      <div><div class="t">{{.Title}}</div><div class="h">{{.Hint}}</div></div>
-      {{if not .Done}}<a class="btn go" href="{{.Href}}">{{.Link}}</a>{{end}}
-    </li>
-    {{end}}
-  </ol>
-</section>
-
-<section class="card" id="nodes">
-  <div class="section-head">
-    <h2>节点</h2>
-    <span class="pill {{if eq $row.OK $row.All}}ok{{else if eq $row.OK 0}}bad{{else}}warn{{end}}">{{$row.OK}} / {{$row.All}} 个正常</span>
+{{/* ---------------------------------------------------------------- how it is doing */}}
+<div class="card mb-3" id="health">
+  <div class="card-status-start bg-{{levelColor $row.Level}}"></div>
+  <div class="card-body">
+    <div class="health {{$row.Level}}">
+      <div class="health-icon">{{if eq $row.Level "ok"}}{{icon "shield-check"}}{{else if eq $row.Level "setup"}}{{icon "list-details"}}{{else}}{{icon "alert-triangle"}}{{end}}</div>
+      <div class="flex-fill">
+        <h2 class="h2">{{$row.Headline}}</h2>
+        <div class="text-secondary">
+          {{$row.OK}}/{{$row.All}} 个节点正常
+          · 名单{{if $c.Last.At.IsZero}}还没发布{{else}}{{$row.Expiry}}{{end}}
+          · 自动维护{{if $c.AutoPublish}}已开启{{else}}没开{{end}}
+        </div>
+        {{if $row.Problems}}
+        <div class="mt-3">
+          {{range $row.Problems}}
+          <div class="d-flex align-items-center gap-2 py-1">
+            <span class="{{if .Bad}}text-danger{{else}}text-warning{{end}}">{{icon "alert-circle"}}</span>
+            <span class="flex-fill">{{.Text}}</span>
+            {{if .Href}}<a href="{{.Href}}" class="btn btn-sm">{{.Link}}</a>{{end}}
+          </div>
+          {{end}}
+        </div>
+        {{end}}
+        {{if and $row.Note (not (hasPrefix $row.Note "自动更新名单失败"))}}<div class="text-secondary small mt-2">{{icon "info-circle"}} {{$row.Note}}</div>{{end}}
+      </div>
+    </div>
   </div>
-  <p class="muted small">节点是替你挡流量的中转服务器。面板会定时像玩家一样连它们检查；连续失败的会自动从名单拿掉，恢复后自动加回来。</p>
-  <div class="tablewrap">
-  <table>
-    <tr><th>名称</th><th>地址</th><th>状态</th>{{if $p.Admin}}<th>操作</th>{{end}}</tr>
-    {{range $row.Nodes}}
-    <tr class="node {{.Status}}">
-      <td><b>{{.N.Name}}</b></td>
-      <td><code>{{.N.Host}}:{{.N.Port}}</code></td>
-      <td><span class="dot"></span>{{.Detail}}{{if .Latency}} · {{.Latency}}{{end}}</td>
-      {{if $p.Admin}}
-      <td class="actions">
-        <form method="post" action="/cluster/{{$c.ID}}/node/{{.N.ID}}/enable" class="inline">
-          <input type="hidden" name="csrf" value="{{$p.CSRF}}">
-          <input type="hidden" name="enabled" value="{{if .N.Enabled}}0{{else}}1{{end}}">
-          <button>{{if .N.Enabled}}停用{{else}}激活{{end}}</button>
-        </form>
-        <form method="post" action="/cluster/{{$c.ID}}/node/{{.N.ID}}/pause" class="inline">
-          <input type="hidden" name="csrf" value="{{$p.CSRF}}">
-          <input name="minutes" value="30" size="3" aria-label="分钟">
-          <button title="暂时把它从名单拿掉，时间到自动回来（测试故障切换用）">暂停 N 分钟</button>
-        </form>
-        <a class="btn" href="/cluster/{{$c.ID}}/node/{{.N.ID}}">管理</a>
-        <form method="post" action="/cluster/{{$c.ID}}/node/{{.N.ID}}/delete" class="inline">
-          <input type="hidden" name="csrf" value="{{$p.CSRF}}">
-          <button class="danger">删除</button>
-        </form>
-      </td>
+</div>
+
+{{/* ---------------------------------------------------------------- setup, only until it is done */}}
+{{if $row.Next}}
+<div class="card mb-3" id="setup">
+  <div class="card-header">
+    <h3 class="card-title">设置步骤</h3>
+    <div class="card-actions"><span class="badge bg-primary-lt">还差 {{$row.Left}} 步</span></div>
+  </div>
+  <div class="card-body py-2">
+    <ol class="todo">
+      {{range $row.Steps}}
+      <li class="{{if .Done}}done{{else if eq $row.Next.Title .Title}}next{{end}}">
+        <div class="todo-body"><div class="todo-title">{{.Title}}</div><div class="text-secondary small">{{.Hint}}</div></div>
+        {{if not .Done}}<a class="btn {{if eq $row.Next.Title .Title}}btn-primary{{end}}" href="{{.Href}}">{{.Link}}</a>{{end}}
+      </li>
       {{end}}
-    </tr>
+    </ol>
+  </div>
+</div>
+{{end}}
+
+{{/* ---------------------------------------------------------------- nodes */}}
+<div class="card mb-3" id="nodes">
+  <div class="card-header">
+    <div>
+      <h3 class="card-title">节点</h3>
+      <div class="card-subtitle">替你挡流量的中转服务器。面板每分钟像玩家一样连一次；连续失败 5 次的会自动从名单拿掉，恢复后自动加回。</div>
+    </div>
+    {{if $p.Admin}}
+    <div class="card-actions btn-list">
+      <form method="post" action="/cluster/{{$c.ID}}/probe"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button class="btn" data-busy="检查中…">{{icon "refresh"}}现在检查</button></form>
+      <a href="/cluster/{{$c.ID}}/node/new" class="btn btn-primary">{{icon "plus"}}加节点</a>
+    </div>
     {{end}}
-  </table>
+  </div>
+  {{if $row.Nodes}}
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table">
+      <thead><tr><th>状态</th><th>名称</th><th>地址</th><th>连接耗时</th><th>说明</th>{{if $p.Admin}}<th class="w-1"></th>{{end}}</tr></thead>
+      <tbody>
+      {{range $row.Nodes}}
+      {{$n := .N}}
+      <tr>
+        <td class="text-nowrap">{{template "status" .}}</td>
+        <td><a href="/cluster/{{$c.ID}}/node/{{$n.ID}}" class="text-reset fw-bold">{{$n.Name}}</a></td>
+        <td class="mono">{{$n.Host}}:{{$n.Port}}</td>
+        <td class="text-secondary">{{if .Latency}}{{.Latency}}{{else}}—{{end}}</td>
+        <td class="text-secondary small">{{if ne .Status "ok"}}{{.Detail}}{{else if not .Checked.IsZero}}{{clock .Checked}} 检查过{{end}}</td>
+        {{if $p.Admin}}
+        <td class="text-nowrap">
+          <div class="btn-list flex-nowrap">
+            <a href="/cluster/{{$c.ID}}/node/{{$n.ID}}" class="btn btn-sm">管理</a>
+            <div class="dropdown">
+              <button class="btn btn-sm btn-icon" data-bs-toggle="dropdown" aria-expanded="false" aria-label="更多操作">{{icon "dots-vertical"}}</button>
+              <div class="dropdown-menu dropdown-menu-end">
+                <h6 class="dropdown-header">暂时拿掉（测试切换用，到时自动回来）</h6>
+                {{range $m := list "30" "120"}}
+                <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/pause"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="minutes" value="{{$m}}">
+                  <button class="dropdown-item">{{icon "player-pause"}}暂停 {{if eq $m "30"}}30 分钟{{else}}2 小时{{end}}</button></form>
+                {{end}}
+                <div class="dropdown-divider"></div>
+                <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/enable"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="enabled" value="{{if $n.Enabled}}0{{else}}1{{end}}">
+                  <button class="dropdown-item">{{if $n.Enabled}}{{icon "power"}}停用（不再放进名单）{{else}}{{icon "player-play"}}重新启用{{end}}</button></form>
+                <a class="dropdown-item" href="/cluster/{{$c.ID}}/node/{{$n.ID}}#edit">{{icon "pencil"}}修改地址或名称</a>
+                <div class="dropdown-divider"></div>
+                <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/delete" data-confirm="删除节点「{{$n.Name}}」（{{$n.Host}}:{{$n.Port}}）。删除后要再更新一次名单，它才会从玩家那边消失。" data-confirm-ok="删除"><input type="hidden" name="csrf" value="{{$p.CSRF}}">
+                  <button class="dropdown-item text-danger">{{icon "trash"}}删除</button></form>
+              </div>
+            </div>
+          </div>
+        </td>
+        {{end}}
+      </tr>
+      {{end}}
+      </tbody>
+    </table>
   </div>
   {{if $p.Admin}}
-  <form method="post" action="/cluster/{{$c.ID}}/probe" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button>现在就检查一遍</button></form>
-  <form method="post" action="/cluster/{{$c.ID}}/upgrade-all" class="inline">
-    <input type="hidden" name="csrf" value="{{$p.CSRF}}">
-    <input name="tag" placeholder="版本，如 v0.2.0" size="14" required aria-label="版本">
-    <button title="一台一台升级；出问题就停">全部升级（通过 SSH）</button>
-  </form>
-  <details>
-    <summary>＋ 加一个节点</summary>
-    <form method="post" action="/cluster/{{$c.ID}}/node" class="stack">
-      <input type="hidden" name="csrf" value="{{$p.CSRF}}">
-      <label>名称 <span class="hint">随便取，方便你认，比如 hk-1。</span><input name="name" required></label>
-      <label>服务器地址 <span class="hint">节点的 IP 或网域。</span><input name="host" required></label>
-      <label>端口号 <span class="hint">节点对外监听的端口，要和节点上的 <code>-listen</code> 一致。</span><input name="port" value="30800" required></label>
-      <label>证书指纹 <span class="hint">生成节点证书时打印的那串（以 = 结尾），用来确保连到的是你的节点。</span><input name="pin" size="48" required></label>
-      <button class="primary">加入节点</button>
-    </form>
-  </details>
+  <div class="card-footer d-flex justify-content-end">
+    <button type="button" class="btn btn-sm btn-ghost-secondary" data-bs-toggle="modal" data-bs-target="#upgrade-all">{{icon "rocket"}}把所有节点升级到新版本</button>
+  </div>
   {{end}}
-</section>
-
-<section class="card" id="publish">
-  <h2>名单更新</h2>
-  <p class="muted small">「名单」就是目前可用节点的清单。面板给它签名后写进下面的域名，App 启动时去域名读它，就知道该连哪些节点。</p>
-  {{if $c.Last.At.IsZero}}
-    <p class="alert">还没有更新过，App 现在找不到任何节点。</p>
   {{else}}
-    <p>上次更新：{{ago $c.Last.At}}（<span class="muted">{{ts $c.Last.At}} UTC</span>）—— {{$c.Last.Result}}<br>
-       <span class="muted">有效到 {{ts (unixTime $c.Last.Exp)}} UTC（{{until $c.Last.Exp}}）</span></p>
-    <ul>{{range $c.Last.Nodes}}<li><code>{{.}}</code></li>{{end}}</ul>
-  {{end}}
-  {{if $c.Last.Manual}}
-    <p class="alert">有「手动」目标：请把下面每一行当成一条独立的 TXT 记录，贴到那个域名的 DNS 里，贴完才生效。</p>
-    <pre>{{range $c.Last.Records}}{{.}}
-{{end}}</pre>
-  {{end}}
-  {{if $p.Admin}}
-  <form method="post" action="/cluster/{{$c.ID}}/publish" class="inline">
-    <input type="hidden" name="csrf" value="{{$p.CSRF}}">
-    <button class="primary">立即更新名单</button>
-  </form>
-  <form method="post" action="/cluster/{{$c.ID}}/auto" class="inline">
-    <input type="hidden" name="csrf" value="{{$p.CSRF}}">
-    <input type="hidden" name="auto" value="{{if $c.AutoPublish}}0{{else}}1{{end}}">
-    <button>{{if $c.AutoPublish}}关闭自动更新{{else}}打开自动更新{{end}}</button>
-  </form>
-  <p class="muted small">自动更新：节点挂了就把它拿掉，新节点稳定了就加进去，名单快到期时自动续期。你手动更新过一次后才能打开。</p>
-  {{end}}
-</section>
-
-<section class="card" id="targets">
-  <h2>写入哪些域名</h2>
-  <p class="muted small">名单会写成这些域名下的一条 TXT 记录。可以放多个域名当备份，App 一个读不到会换下一个。</p>
-  <div class="tablewrap">
-  <table>
-    <tr><th>服务商</th><th>完整网域</th><th>主域名</th><th>用哪个授权</th>{{if $p.Admin}}<th></th>{{end}}</tr>
-    {{range $i, $t := $c.Targets}}
-    <tr><td>{{if eq $t.Provider "manual"}}手动贴{{else}}{{$t.Provider}}{{end}}</td><td><code>{{$t.Name}}</code></td><td>{{$t.Zone}}</td><td>{{if $t.CredRef}}{{$t.CredRef}}{{else}}—{{end}}</td>
-      {{if $p.Admin}}<td><form method="post" action="/cluster/{{$c.ID}}/target/{{$i}}/delete" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button class="danger">移除</button></form></td>{{end}}
-    </tr>
-    {{end}}
-  </table>
+  <div class="empty empty-sm">
+    <p class="empty-title">还没有节点</p>
+    <p class="empty-subtitle text-secondary">至少要有一个正常的节点，玩家才连得上。</p>
+    {{if $p.Admin}}<div class="empty-action"><a href="/cluster/{{$c.ID}}/node/new" class="btn btn-primary">{{icon "plus"}}加第一个节点</a></div>{{end}}
   </div>
-  {{if $p.Admin}}
-  <details>
-    <summary>＋ 加一个域名</summary>
-    <form method="post" action="/cluster/{{$c.ID}}/target" class="stack">
-      <input type="hidden" name="csrf" value="{{$p.CSRF}}">
-      <label>服务商
-        <select name="provider">
-          <option value="cloudflare">Cloudflare（推荐，自动写入）</option>
-          <option value="spaceship">Spaceship（自动写入）</option>
-          <option value="aliyun">阿里云（自动写入）</option>
-          <option value="manual">手动（面板只生成记录，你自己贴）</option>
-        </select></label>
-      <label>完整网域 <span class="hint">名单要放在哪个名字下，比如 <code>cfg.example.com</code>。不要用域名本身（<code>example.com</code>），免得盖掉你别的记录。</span>
-        <input name="dns_name" placeholder="cfg.example.com" required></label>
-      <label>主域名（只有 Cloudflare 以外才要填） <span class="hint">你注册的那个域名，比如 <code>example.com</code>。用 Cloudflare 的话留空，面板会自己找，也不需要 Zone ID。</span>
-        <input name="zone" placeholder="example.com"></label>
-      <label>用哪个授权 <span class="hint">在「域名授权」页存的名字，一般是 <code>main</code>。手动的不用填。</span>
-        <input name="cred_ref" placeholder="main"></label>
-      <button class="primary">加入</button>
-    </form>
-  </details>
   {{end}}
-</section>
+</div>
 
-<section class="card">
-  <h2>给 App 用的设置</h2>
-  <p class="muted small">把下面两项填进 App 的 <code>DiscoveryConfig</code>。不同渠道的网域和公钥不一样，每个渠道的安装包要放自己的。</p>
-  <dl>
-    <dt>去哪些网域读名单</dt><dd>{{range $c.Targets}}<code>{{.Name}}</code> {{end}}</dd>
-    <dt>验证名单真假的公钥（公开的，不是秘密）</dt><dd><code class="wrap">{{$c.PublicKey}}</code></dd>
-    {{if $c.Sealed}}<dt>名单解密密钥（App 要用它才读得懂名单）</dt><dd>{{if .Data.SealKey}}<code class="wrap">{{.Data.SealKey}}</code>{{else if $p.Admin}}<span class="muted">解锁保险库后才显示。</span>{{else}}<span class="muted">只有管理员能看到。</span>{{end}}</dd>{{end}}
-  </dl>
-  {{if $p.Admin}}
-  <h3>加密名单</h3>
-  <p class="muted small">缺省名单只有签名、没有加密：任何人只要知道域名，就能读到所有节点的 IP。打开后，名单内容会加密，没有解密密钥的人（比如只看 DNS 记录的人）看不懂。密钥要放进 App，所以这只是提高门槛，不是绝对安全。<b>打开后要把密钥填进 App 的 <code>listKey</code> 并重新发版</b>；没更新的旧 App 之后就读不到名单了，请在新版本铺开后再开。</p>
-  <form method="post" action="/cluster/{{$c.ID}}/seal" class="inline">
-    <input type="hidden" name="csrf" value="{{$p.CSRF}}">
-    <input type="hidden" name="seal" value="{{if $c.Sealed}}0{{else}}1{{end}}">
-    <button{{if not $c.Sealed}} class="primary"{{end}}>{{if $c.Sealed}}关闭加密{{else}}打开加密{{end}}</button>
-  </form>
-  {{end}}
-</section>
+<div class="row row-deck row-cards mb-3">
+{{/* ---------------------------------------------------------------- the list */}}
+<div class="col-lg-6" id="publish">
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h3 class="card-title">名单</h3>
+        <div class="card-subtitle">可用节点的清单。面板签好名写进你的域名，App 去域名读它，就知道连哪些节点。</div>
+      </div>
+    </div>
+    <div class="card-body">
+      {{if $c.Last.At.IsZero}}
+        <div class="alert alert-warning mb-3">还没发布过，App 现在找不到任何节点。</div>
+      {{else}}
+      <dl class="row mb-0">
+        <dt class="col-5 text-secondary fw-normal">上次更新</dt><dd class="col-7">{{ago $c.Last.At}}<div class="text-secondary small">{{ts $c.Last.At}}</div></dd>
+        <dt class="col-5 text-secondary fw-normal">有效到</dt><dd class="col-7">{{ts (unixTime $c.Last.Exp)}}<div class="text-secondary small">{{until $c.Last.Exp}}</div></dd>
+        <dt class="col-5 text-secondary fw-normal">从外面读回</dt><dd class="col-7">{{if $c.Last.Manual}}<span class="text-warning">等你手动贴记录</span>{{else if $c.Last.Verified}}<span class="text-success">{{icon "check"}}读到了</span>{{else}}<span class="text-warning">还读不到</span>{{end}}</dd>
+        <dt class="col-5 text-secondary fw-normal">名单里的节点</dt><dd class="col-7">{{range $c.Last.Nodes}}<div class="mono">{{.}}</div>{{end}}</dd>
+      </dl>
+      {{end}}
+      {{if $c.Last.Manual}}
+      <div class="alert alert-warning mt-3 mb-2">有「手动」域名：把下面每一行当成一条独立的 TXT 记录，贴进那个域名的 DNS，贴完才生效。</div>
+      <pre class="script" id="manual-records">{{range $c.Last.Records}}{{.}}
+{{end}}</pre>
+      <button type="button" class="btn btn-sm" data-copy="#manual-records">{{icon "copy"}}<span>复制</span></button>
+      {{end}}
+    </div>
+    {{if $p.Admin}}
+    <div class="card-footer">
+      <div class="d-flex gap-2 flex-wrap align-items-center">
+        <form method="post" action="/cluster/{{$c.ID}}/publish"><input type="hidden" name="csrf" value="{{$p.CSRF}}">
+          <button class="btn btn-primary" data-busy="正在签名并写入域名…">{{icon "cloud-upload"}}立即更新名单</button></form>
+        <form method="post" action="/cluster/{{$c.ID}}/auto"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="auto" value="{{if $c.AutoPublish}}0{{else}}1{{end}}">
+          {{if $c.Last.At.IsZero}}{{else if $c.AutoPublish}}<button class="btn" data-confirm="关闭后，节点坏了不会自动拿掉，名单到期也不会自动续期。" data-confirm-ok="关闭">{{icon "player-pause"}}关闭自动维护</button>
+          {{else}}<button class="btn">{{icon "player-play"}}打开自动维护</button>{{end}}</form>
+      </div>
+      <div class="text-secondary small mt-2">自动维护：节点坏了自动拿掉、好了自动加回，名单到期前 {{$c.RenewBeforeDays}} 天自动续期。第一次要手动更新一次才能打开。</div>
+    </div>
+    {{end}}
+  </div>
+</div>
+
+{{/* ---------------------------------------------------------------- domains */}}
+<div class="col-lg-6" id="targets">
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h3 class="card-title">域名</h3>
+        <div class="card-subtitle">名单写在这些域名的 TXT 记录里。多放几个当备份，App 一个读不到会换下一个。</div>
+      </div>
+      {{if $p.Admin}}<div class="card-actions"><button type="button" class="btn btn-sm" data-bs-toggle="modal" data-bs-target="#target-add">{{icon "plus"}}加域名</button></div>{{end}}
+    </div>
+    <div class="list-group list-group-flush">
+      {{range $i, $t := $c.Targets}}
+      <div class="list-group-item">
+        <div class="d-flex align-items-center gap-2">
+          <div class="flex-fill">
+            <div class="mono fw-bold">{{$t.Name}}</div>
+            <div class="text-secondary small">{{if eq $t.Provider "manual"}}手动贴记录{{else}}{{providerName $t.Provider}} · 授权「{{$t.CredRef}}」{{end}}</div>
+          </div>
+          {{if $p.Admin}}
+          <button type="button" class="btn btn-sm btn-icon" data-bs-toggle="modal" data-bs-target="#target-edit-{{$i}}" aria-label="修改">{{icon "pencil"}}</button>
+          <form method="post" action="/cluster/{{$c.ID}}/target/{{$i}}/delete" data-confirm="不再把名单写进 {{$t.Name}}。已经写进去的记录不会被删掉。" data-confirm-ok="移除">
+            <input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="name" value="{{$t.Name}}">
+            <button class="btn btn-sm btn-icon btn-ghost-danger" aria-label="移除">{{icon "trash"}}</button></form>
+          {{end}}
+        </div>
+      </div>
+      {{end}}
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="row row-deck row-cards">
+{{/* ---------------------------------------------------------------- for the app */}}
+<div class="col-lg-6" id="app">
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h3 class="card-title">给 App 用的设置</h3>
+        <div class="card-subtitle">发给做客户端的同事，填进 App 的 <code>DiscoveryConfig</code>。每个渠道的安装包放自己的。</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="mb-3">
+        <div class="form-label">读名单的域名</div>
+        <div class="copy-row"><div class="form-control mono" id="app-names">{{range $i, $t := $c.Targets}}{{if $i}}, {{end}}{{$t.Name}}{{end}}</div>
+          <button type="button" class="btn" data-copy="#app-names">{{icon "copy"}}<span>复制</span></button></div>
+      </div>
+      <div class="mb-3">
+        <div class="form-label">公钥 <span class="text-secondary fw-normal">（公开的，不是秘密）</span></div>
+        <div class="copy-row"><div class="form-control secret-box" id="app-key">{{$c.PublicKey}}</div>
+          <button type="button" class="btn" data-copy="#app-key">{{icon "copy"}}<span>复制</span></button></div>
+      </div>
+      {{if $c.Sealed}}
+      <div>
+        <div class="form-label">名单解密密钥 <span class="text-secondary fw-normal">（填进 App 的 <code>listKey</code>）</span></div>
+        {{if .Data.SealKey}}
+        <div class="copy-row"><div class="form-control secret-box" id="app-seal">{{.Data.SealKey}}</div>
+          <button type="button" class="btn" data-copy="#app-seal">{{icon "copy"}}<span>复制</span></button></div>
+        {{else if $p.Admin}}<div class="text-secondary">解锁保险库后才显示。</div>
+        {{else}}<div class="text-secondary">只有管理员能看到。</div>{{end}}
+      </div>
+      {{end}}
+    </div>
+  </div>
+</div>
+
+{{/* ---------------------------------------------------------------- settings */}}
+<div class="col-lg-6" id="settings">
+  <div class="card">
+    <div class="card-header"><h3 class="card-title">渠道设置</h3></div>
+    <div class="card-body">
+      {{if $p.Admin}}
+      <form method="post" action="/cluster/{{$c.ID}}/edit">
+        <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+        <div class="mb-3"><label class="form-label" for="c-name">渠道名称</label><input class="form-control" id="c-name" name="name" value="{{$c.Name}}" required></div>
+        <div class="mb-3"><label class="form-label" for="c-origin">源站地址</label>
+          <input class="form-control mono" id="c-origin" name="origin" value="{{$c.Origin}}" placeholder="203.0.113.5:10443">
+          <div class="form-hint">节点最后把玩家的流量转到这里（游戏服务器的 IP:端口）。加节点向导会用它。</div></div>
+        <div class="row">
+          <div class="col-6 mb-3"><label class="form-label" for="c-valid">名单有效几天</label><input class="form-control" id="c-valid" name="valid_days" type="number" min="2" max="90" value="{{$c.ValidDays}}" required></div>
+          <div class="col-6 mb-3"><label class="form-label" for="c-renew">到期前几天续期</label><input class="form-control" id="c-renew" name="renew_days" type="number" min="1" max="89" value="{{$c.RenewBeforeDays}}" required></div>
+        </div>
+        <button class="btn">{{icon "check"}}保存设置</button>
+      </form>
+      {{else}}
+      <dl class="row mb-0">
+        <dt class="col-5 text-secondary fw-normal">源站</dt><dd class="col-7 mono">{{if $c.Origin}}{{$c.Origin}}{{else}}—{{end}}</dd>
+        <dt class="col-5 text-secondary fw-normal">名单有效期</dt><dd class="col-7">{{$c.ValidDays}} 天，到期前 {{$c.RenewBeforeDays}} 天续期</dd>
+      </dl>
+      {{end}}
+
+      {{if $c.Origin}}
+      <hr>
+      <div class="d-flex align-items-start gap-3">
+        <div class="flex-fill">
+          <div class="fw-bold">源站是否藏好了</div>
+          {{with .Data.Origin}}
+            {{if .At.IsZero}}<div class="text-secondary small">还没检查过。</div>
+            {{else if .Open}}<div class="text-danger small">{{icon "alert-triangle"}} 对公网开放（{{clock .At}} 检查）：任何人知道地址就能绕过节点。请把源站防火墙改成只放行节点的 IP。</div>
+            {{else}}<div class="text-success small">{{icon "shield-check"}} 从外面连不上（{{clock .At}} 检查），这是对的。</div>{{end}}
+          {{end}}
+          <div class="text-secondary small mt-1">面板从它自己的位置去连源站。如果你在源站防火墙里放行了面板的 IP，这里会误报「开放」。</div>
+        </div>
+        {{if $p.Admin}}<form method="post" action="/cluster/{{$c.ID}}/origin-check"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button class="btn btn-sm" data-busy="检查中…">现在检查</button></form>{{end}}
+      </div>
+      {{end}}
+
+      {{if $p.Admin}}
+      <hr>
+      <div class="d-flex align-items-start gap-3">
+        <div class="flex-fill">
+          <div class="fw-bold">加密名单 {{if $c.Sealed}}<span class="badge bg-success-lt">已开启</span>{{else}}<span class="badge">没开</span>{{end}}</div>
+          <div class="text-secondary small">不加密时，知道域名的人能读到所有节点的 IP。打开后要把解密密钥填进 App 的 <code>listKey</code> 并发新版；<b>还没更新的旧 App 会读不到名单</b>，所以等新版铺开后再开。</div>
+        </div>
+        <form method="post" action="/cluster/{{$c.ID}}/seal"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="seal" value="{{if $c.Sealed}}0{{else}}1{{end}}">
+          {{if $c.Sealed}}<button class="btn btn-sm" data-confirm="关闭后，下一次更新的名单不再加密。">关闭</button>
+          {{else}}<button class="btn btn-sm" data-confirm="打开后，没填 listKey 的旧版 App 会读不到名单、连不上。确定新版 App 已经铺开了吗？" data-confirm-ok="打开">打开</button>{{end}}</form>
+      </div>
+      {{end}}
+    </div>
+  </div>
+</div>
+</div>
+
+{{if $p.Admin}}
+{{/* ---------------------------------------------------------------- dialogs */}}
+<div class="modal modal-blur fade" id="target-add" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+    <form method="post" action="/cluster/{{$c.ID}}/target">
+      <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+      <div class="modal-header"><h5 class="modal-title">加一个域名</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button></div>
+      <div class="modal-body">{{template "target-fields" dict "T" nil "ID" "new"}}</div>
+      <div class="modal-footer"><button type="button" class="btn" data-bs-dismiss="modal">取消</button><button class="btn btn-primary">加入</button></div>
+    </form>
+  </div></div>
+</div>
+{{range $i, $t := $c.Targets}}
+<div class="modal modal-blur fade" id="target-edit-{{$i}}" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+    <form method="post" action="/cluster/{{$c.ID}}/target/{{$i}}/edit">
+      <input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="old_name" value="{{$t.Name}}">
+      <div class="modal-header"><h5 class="modal-title">修改域名</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button></div>
+      <div class="modal-body">{{template "target-fields" dict "T" $t "ID" $i}}</div>
+      <div class="modal-footer"><button type="button" class="btn" data-bs-dismiss="modal">取消</button><button class="btn btn-primary">保存</button></div>
+    </form>
+  </div></div>
+</div>
+{{end}}
+<div class="modal modal-blur fade" id="upgrade-all" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+    <form method="post" action="/cluster/{{$c.ID}}/upgrade-all">
+      <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+      <div class="modal-header"><h5 class="modal-title">升级所有节点</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button></div>
+      <div class="modal-body">
+        <p class="text-secondary">面板会一台一台升级（只升级设置好远程管理的节点）：下载、核对校验码、安装，再像玩家一样检查。哪台没通过就自动退回旧版，并且停下来不碰剩下的。</p>
+        <label class="form-label" for="ua-tag">版本号</label>
+        <input class="form-control" id="ua-tag" name="tag" placeholder="例如 v0.4.0" value="{{.Data.Latest}}" required>
+      </div>
+      <div class="modal-footer"><button type="button" class="btn" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary" data-busy="升级中，可能要十几分钟…">开始升级</button></div>
+    </form>
+  </div></div>
+</div>
+{{end}}
 {{template "foot" .}}
+
+{{define "target-fields"}}
+{{$t := .T}}
+<div class="mb-3"><label class="form-label">服务商</label>
+  <select class="form-select" name="provider">
+    {{range $v := list "cloudflare" "spaceship" "aliyun" "manual"}}<option value="{{$v}}"{{if $t}}{{if eq $t.Provider $v}} selected{{end}}{{end}}>{{providerName $v}}{{if eq $v "cloudflare"}}（推荐）{{end}}</option>{{end}}
+  </select></div>
+<div class="mb-3"><label class="form-label">完整域名</label>
+  <input class="form-control mono" name="dns_name" value="{{if $t}}{{$t.Name}}{{end}}" placeholder="cfg.example.com" required>
+  <div class="form-hint">名单放在哪个名字下，比如 <code>cfg.example.com</code>。别用主域名本身（<code>example.com</code>），免得盖掉别的记录。</div></div>
+<div class="mb-3"><label class="form-label">主域名 <span class="text-secondary fw-normal">（用 Cloudflare 的话留空）</span></label>
+  <input class="form-control mono" name="zone" value="{{if $t}}{{$t.Zone}}{{end}}" placeholder="example.com">
+  <div class="form-hint">你注册的那个域名。Cloudflare 会自己找，不用填。</div></div>
+<div><label class="form-label">用哪个授权 <span class="text-secondary fw-normal">（手动的不用填）</span></label>
+  <input class="form-control" name="cred_ref" value="{{if $t}}{{$t.CredRef}}{{else}}main{{end}}" placeholder="main">
+  <div class="form-hint">在「域名授权」页保存时起的名字，一般是 <code>main</code>。</div></div>
+{{end}}

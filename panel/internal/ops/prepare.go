@@ -19,6 +19,29 @@ var (
 //
 // from, if not empty, restricts the key to those source addresses (the panel's own address).
 func PrepareScript(pubLine, nodectlURL, nodectlSHA, from string) (string, error) {
+	steps, err := manageSteps(pubLine, nodectlURL, nodectlSHA, from)
+	if err != nil {
+		return "", err
+	}
+	return `#!/bin/sh
+# Prepare this server so the gamec control panel can manage the edge node on it.
+# Run once, as root. It is safe to run again. Read it first: this is everything it does.
+set -eu
+
+[ "$(id -u)" = 0 ] || { echo "run this as root" >&2; exit 1; }
+command -v systemctl >/dev/null || { echo "this needs systemd" >&2; exit 1; }
+command -v sudo >/dev/null || { echo "install sudo first" >&2; exit 1; }
+command -v curl >/dev/null || { echo "install curl first" >&2; exit 1; }
+command -v sha256sum >/dev/null || { echo "sha256sum is missing" >&2; exit 1; }
+` + steps + `
+echo "done. This server's SSH host keys. The panel uses the ED25519 one; compare it with what the panel shows:"
+for f in /etc/ssh/ssh_host_*_key.pub; do [ -f "$f" ] && ssh-keygen -lf "$f"; done
+[ -f /etc/ssh/ssh_host_ed25519_key.pub ] || echo "WARNING: this server has no ED25519 host key; the panel cannot connect until one exists (ssh-keygen -A)" >&2
+`, nil
+}
+
+// manageSteps is the part of a script that sets up management by the panel (see PrepareScript).
+func manageSteps(pubLine, nodectlURL, nodectlSHA, from string) (string, error) {
 	if !pubLineRe.MatchString(pubLine) {
 		return "", errors.New("that is not an ed25519 public key line")
 	}
@@ -35,24 +58,15 @@ func PrepareScript(pubLine, nodectlURL, nodectlSHA, from string) (string, error)
 		}
 		opts += `,from="` + from + `"`
 	}
-	return fmt.Sprintf(`#!/bin/sh
-# Prepare this server so the gamec control panel can manage the edge node on it.
-# Run once, as root. It is safe to run again. Read it first: this is everything it does.
-set -eu
-
-[ "$(id -u)" = 0 ] || { echo "run this as root" >&2; exit 1; }
-command -v systemctl >/dev/null || { echo "this needs systemd" >&2; exit 1; }
-command -v sudo >/dev/null || { echo "install sudo first" >&2; exit 1; }
-command -v curl >/dev/null || { echo "install curl first" >&2; exit 1; }
-command -v sha256sum >/dev/null || { echo "sha256sum is missing" >&2; exit 1; }
-
-# 1. a restricted account, no password
+	return fmt.Sprintf(`
+# 1. a restricted account for the panel, no password
 id gamec-ops >/dev/null 2>&1 || useradd --system --create-home --home-dir /var/lib/gamec-ops --shell /bin/sh gamec-ops
 install -d -m 0700 -o gamec-ops -g gamec-ops /var/lib/gamec-ops/.ssh
 install -d -m 0750 -o gamec-ops -g gamec-ops /var/lib/gamec-ops/incoming
 
 # 2. only the panel's key may log in; no port forwarding, no terminal
-printf '%%s\n' '%s %s' > /var/lib/gamec-ops/.ssh/authorized_keys
+printf '%%s
+' '%s %s' > /var/lib/gamec-ops/.ssh/authorized_keys
 chown gamec-ops:gamec-ops /var/lib/gamec-ops/.ssh/authorized_keys
 chmod 0600 /var/lib/gamec-ops/.ssh/authorized_keys
 
@@ -64,14 +78,11 @@ install -m 0755 -o root -g root "$tmp" /usr/local/sbin/gamec-nodectl
 rm -f "$tmp"
 
 # 4. sudo may run that program and nothing else
-printf 'gamec-ops ALL=(root) NOPASSWD: /usr/local/sbin/gamec-nodectl\n' > /etc/sudoers.d/gamec-ops.tmp
+printf 'gamec-ops ALL=(root) NOPASSWD: /usr/local/sbin/gamec-nodectl
+' > /etc/sudoers.d/gamec-ops.tmp
 chmod 0440 /etc/sudoers.d/gamec-ops.tmp
 visudo -c -f /etc/sudoers.d/gamec-ops.tmp >/dev/null
 mv /etc/sudoers.d/gamec-ops.tmp /etc/sudoers.d/gamec-ops
-
-echo "done. This server's SSH host keys. The panel uses the ED25519 one; compare it with what the panel shows:"
-for f in /etc/ssh/ssh_host_*_key.pub; do [ -f "$f" ] && ssh-keygen -lf "$f"; done
-[ -f /etc/ssh/ssh_host_ed25519_key.pub ] || echo "WARNING: this server has no ED25519 host key; the panel cannot connect until one exists (ssh-keygen -A)" >&2
 `, opts, pubLine, nodectlURL, nodectlSHA), nil
 }
 

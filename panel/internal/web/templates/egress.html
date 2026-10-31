@@ -1,72 +1,100 @@
 {{template "head" .}}
 {{$p := .}}
-<p class="lead">面板每次去检查节点、管理节点，节点都会看到面板的 IP。如果节点被攻击，攻击者就可能顺着这条线摸到面板。这里可以让所有连接<b>先经过一台中转机</b>，节点只会看到中转机的 IP，看不到面板。</p>
-<section class="card">
-  <p class="muted small">中转机上不用装任何软件，它的帐号也不能运行指令，只能转发。中转机用不了时，连接会<b>直接失败</b>，绝不会偷偷改成直连。</p>
-</section>
-
-<section class="card">
-  <h2>中转机</h2>
-  {{if .Data.Cfg}}
-    <p><code>{{.Data.Cfg.User}}@{{.Data.Cfg.Addr}}</code></p>
-    {{if .Data.Cfg.HostKey}}<p class="okc">&#10003; 已确认机器指纹：<code class="wrap">{{.Data.Cfg.HostKey}}</code></p>
-    {{else}}<p class="alert">机器指纹还没确认：确认之前，面板不会向任何节点送出东西。</p>{{end}}
-  {{else}}
-    <p class="muted">还没设置：面板直接连到节点，节点看得到面板的 IP。</p>
-  {{end}}
-  <form method="post" action="/egress/set" class="stack">
-    <input type="hidden" name="csrf" value="{{$p.CSRF}}">
-    <label>中转机地址 <span class="hint">IP 或 IP:端口，SSH 端口缺省 22。</span><input name="addr" value="{{if .Data.Cfg}}{{.Data.Cfg.Addr}}{{end}}" required></label>
-    <label>帐号 <span class="hint">一般用 <code>gamec-jump</code>。</span><input name="user" value="{{if .Data.Cfg}}{{.Data.Cfg.User}}{{else}}gamec-jump{{end}}" required></label>
-    <button>保存</button>
-  </form>
-  {{if .Data.Cfg}}
-  <form method="post" action="/egress/remove" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button class="danger">不用了，改回直连</button></form>
-  {{end}}
-</section>
+<div class="row row-cards">
+<div class="col-lg-8">
+<div class="card mb-3">
+  <div class="card-header"><h3 class="card-title">中转机</h3>
+    <div class="card-actions">{{if .Data.Cfg}}{{if .Data.Cfg.HostKey}}<span class="badge bg-success-lt">正在使用</span>{{else}}<span class="badge bg-warning-lt">等你确认指纹</span>{{end}}{{else}}<span class="badge">没用，直接连接</span>{{end}}</div></div>
+  <div class="card-body">
+    {{if .Data.Cfg}}
+      <div class="mono h3">{{.Data.Cfg.User}}@{{.Data.Cfg.Addr}}</div>
+      {{if .Data.Cfg.HostKey}}<div class="text-success mb-3">{{icon "fingerprint"}} 已确认指纹：<span class="mono">{{.Data.Cfg.HostKey}}</span></div>
+      {{else}}<div class="alert alert-warning">中转机的指纹还没确认：确认之前，面板不会向任何节点发送东西。</div>{{end}}
+    {{else}}
+      <p class="text-secondary">还没设置：面板直接连节点，节点看得到面板的 IP。</p>
+    {{end}}
+    <form method="post" action="/egress/set">
+      <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+      <div class="row">
+        <div class="col-md-7 mb-3"><label class="form-label" for="e-addr">中转机地址</label><input class="form-control mono" id="e-addr" name="addr" value="{{if .Data.Cfg}}{{.Data.Cfg.Addr}}{{end}}" placeholder="203.0.113.7 或 203.0.113.7:2222" required><div class="form-hint">IP 或 IP:端口，SSH 端口默认 22。</div></div>
+        <div class="col-md-5 mb-3"><label class="form-label" for="e-user">账号</label><input class="form-control" id="e-user" name="user" value="{{if .Data.Cfg}}{{.Data.Cfg.User}}{{else}}gamec-jump{{end}}" required></div>
+      </div>
+      <div class="btn-list">
+        <button class="btn btn-primary">保存</button>
+      </div>
+    </form>
+    {{if .Data.Cfg}}
+    <form method="post" action="/egress/remove" class="mt-2" data-confirm="之后面板直接连节点，节点会看到面板的 IP。" data-confirm-ok="改回直连"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button class="btn btn-ghost-danger btn-sm">不用了，改回直连</button></form>
+    {{end}}
+  </div>
+</div>
 
 {{if .Data.Cfg}}
-<section class="card">
-  <h2>确认中转机是真的</h2>
+<div class="card mb-3">
+  <div class="card-header"><h3 class="card-title">确认中转机是真的</h3></div>
+  <div class="card-body">
   {{if .Data.Fingerprint}}
-    {{if .Data.KeyChanged}}<div class="banner err"><b>和你之前确认的指纹不一样！</b>可能是这台机器重装过，也可能有人在拦截连接。</div>{{end}}
-    <p>这台机器出示的指纹（<code>{{.Data.KeyType}}</code>）：<code class="wrap">{{.Data.Fingerprint}}</code></p>
-    <p class="muted small">请和你在那台机器上运行脚本时印出的 ED25519 那一行比对，一模一样才信任。</p>
-    <form method="post" action="/egress/hostkey" class="inline">
+    {{if .Data.KeyChanged}}<div class="alert alert-danger"><b>和你之前确认的指纹不一样！</b>可能这台机器重装过，也可能有人在拦截。</div>{{end}}
+    <p>这台机器出示的指纹（<code>{{.Data.KeyType}}</code>）：</p>
+    <div class="form-control secret-box mb-2">{{.Data.Fingerprint}}</div>
+    <p class="text-secondary small">和你在那台机器上跑脚本时印出的 ED25519 那一行比对，一模一样才信任。</p>
+    <form method="post" action="/egress/hostkey">
       <input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="action" value="trust"><input type="hidden" name="fingerprint" value="{{.Data.Fingerprint}}">
-      <button class="primary">一模一样，信任它</button>
+      <button class="btn btn-primary">{{icon "check"}}一模一样，信任它</button>
     </form>
   {{else}}
-    <form method="post" action="/egress/hostkey" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="action" value="fetch"><button>{{if .Data.Cfg.HostKey}}重新检查指纹{{else}}取得机器指纹{{end}}</button></form>
+    <form method="post" action="/egress/hostkey"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="action" value="fetch">
+      <button class="btn" data-busy="读取中…">{{icon "fingerprint"}}{{if .Data.Cfg.HostKey}}重新读取指纹{{else}}读取机器指纹{{end}}</button></form>
   {{end}}
-</section>
+  </div>
+</div>
 
-<section class="card">
-  <h2>准备中转机</h2>
+<div class="card mb-3">
+  <div class="card-header"><h3 class="card-title">准备中转机</h3></div>
+  <div class="card-body">
   {{if .Data.HasKey}}
-  <p>会生成一段脚本，请先看一遍，再到中转机上用 <b>root 运行一次</b>。它创建一个专用帐号，并且只允许转发到你节点的地址和端口，别的地方一律不通。以后添加节点，要回来重新生成并再跑一次。</p>
-  <form method="post" action="/egress/script" class="stack">
-    <input type="hidden" name="csrf" value="{{$p.CSRF}}">
-    <label>只允许从这个地址登录（建议填面板自己的 IP） <input name="from" placeholder="203.0.113.9"></label>
-    <button class="primary">生成脚本</button>
-  </form>
-  {{if .Data.Script}}<pre>{{.Data.Script}}</pre>
-  <p class="muted small">然后在每台节点上，防火墙只放行<b>中转机</b>的 IP（不要再放行面板的 IP）。</p>{{end}}
-  {{else}}<p class="alert">面板还没有自己的密钥。请在面板所在服务器上运行一次 <code>panel ssh-keygen</code>。</p>{{end}}
-</section>
+    <p>生成一段脚本，<b>先看一遍，再到中转机上用 root 运行一次</b>。它建一个专用账号，只允许转发到你节点的地址和端口，别的地方一律不通。<b>以后加了节点，要回来重新生成并再跑一次。</b></p>
+    <form method="post" action="/egress/script" class="d-flex gap-2 flex-wrap align-items-end">
+      <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+      <div class="flex-fill"><label class="form-label" for="e-from">只允许从这个地址登录 <span class="text-secondary fw-normal">（建议填面板服务器的 IP）</span></label><input class="form-control mono" id="e-from" name="from" placeholder="203.0.113.9"></div>
+      <button class="btn btn-primary">{{icon "terminal-2"}}生成脚本</button>
+    </form>
+    {{if .Data.Script}}
+    <hr>
+    <div class="d-flex align-items-center mb-2"><h4 class="mb-0 flex-fill">脚本</h4><button type="button" class="btn btn-sm" data-copy="#jump-script">{{icon "copy"}}<span>复制</span></button></div>
+    <pre class="script" id="jump-script">{{.Data.Script}}</pre>
+    <div class="text-secondary">然后在每台节点上，防火墙只放行<b>中转机</b>的 IP（不要再放行面板的 IP）。</div>
+    {{end}}
+  {{else}}<div class="alert alert-warning mb-0">面板还没有自己的密钥。先停掉面板，在面板服务器上运行一次 <code>panel ssh-keygen</code>。</div>{{end}}
+  </div>
+</div>
 
-<section class="card">
-  <h2>测试</h2>
-  <p class="muted small">经过中转机，对每个节点各连一次，看通不通。</p>
-  <form method="post" action="/egress/test" class="inline"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button>测试所有节点</button></form>
+<div class="card">
+  <div class="card-header"><h3 class="card-title">测试</h3>
+    <div class="card-actions"><form method="post" action="/egress/test"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button class="btn btn-sm" data-busy="测试中…">经过中转机连一次所有节点</button></form></div></div>
   {{if .Data.Tests}}
-  <div class="tablewrap">
-  <table>
-    <tr><th>节点</th><th>地址</th><th>结果</th><th>耗时</th></tr>
-    {{range .Data.Tests}}<tr class="{{if .OK}}ok{{else}}fail{{end}}"><td>{{.Node}}</td><td><code>{{.Addr}}</code></td><td><span class="dot"></span>{{if .OK}}可连通{{else}}{{.Err}}{{end}}</td><td>{{.Took}}</td></tr>{{end}}
+  <div class="table-responsive">
+  <table class="table table-vcenter card-table">
+    <thead><tr><th>节点</th><th>地址</th><th>结果</th><th>耗时</th></tr></thead>
+    <tbody>
+    {{range .Data.Tests}}<tr><td>{{.Node}}</td><td class="mono">{{.Addr}}</td><td>{{if .OK}}<span class="status status-green"><span class="status-dot"></span>可连通</span>{{else}}<span class="status status-red"><span class="status-dot"></span>{{.Err}}</span>{{end}}</td><td class="text-secondary">{{.Took}}</td></tr>{{end}}
+    </tbody>
   </table>
   </div>
-  {{end}}
-</section>
+  {{else}}<div class="card-body text-secondary">还没测试过。</div>{{end}}
+</div>
 {{end}}
+</div>
+
+<div class="col-lg-4">
+<div class="card">
+  <div class="card-header"><h3 class="card-title">为什么要中转</h3></div>
+  <div class="card-body">
+    <p>面板每次检查、管理节点，节点都会看到面板的 IP。万一节点被攻破，攻击者就可能顺着摸到面板。</p>
+    <p>设置中转机之后，所有连接先经过它，节点只看到中转机的 IP。</p>
+    <p class="text-secondary small mb-0">中转机上不用装软件，它的账号也不能运行命令，只能转发。中转机用不了时，连接会<b>直接失败</b>，绝不会偷偷改成直连。</p>
+  </div>
+</div>
+</div>
+</div>
 {{template "foot" .}}

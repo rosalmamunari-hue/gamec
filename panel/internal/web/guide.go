@@ -127,7 +127,7 @@ func (s *Server) renderSecrets(w http.ResponseWriter, r *http.Request, flash, er
 		}
 		sort.Slice(d.Creds, func(i, j int) bool { return d.Creds[i].Ref < d.Creds[j].Ref })
 	}
-	s.render(w, r, "secrets.html", page{Title: "域名授权", Flash: flash, Error: errMsg, Data: d}, status)
+	s.render(w, r, "secrets.html", page{Title: "域名授权", Lead: "面板要把名单写进你的域名，需要域名服务商给它一个授权（令牌）。", Flash: flash, Error: errMsg, Data: d}, status)
 }
 
 func (s *Server) secretsPage(w http.ResponseWriter, r *http.Request, _ *auth.Session) {

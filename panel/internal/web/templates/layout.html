@@ -4,33 +4,115 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{.Title}} - gamec 面板</title>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/vendor/tabler.min.css">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/theme.js"></script>
 </head>
 <body>
-<header>
-  <a class="brand" href="/">gamec 面板</a>
-  {{if .User}}
-  <nav>
-    <a href="/">渠道</a>
-    {{if .Admin}}<a href="/secrets">域名授权</a><a href="/ssh">服务器管理</a><a href="/egress">出口代理</a>{{end}}
-    <a href="/audit">操作记录</a>
-    <form method="post" action="/logout">
-      <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <span class="who">{{.User}}{{if .Admin}}（管理员）{{else}}（只读）{{end}}</span>
-      <button class="link">注销</button>
-    </form>
-  </nav>
-  {{end}}
-</header>
-<main>
-{{if .Sealed}}<div class="banner warn"><b>保险库现在是上锁的。</b>在解锁之前，面板不能更新名单，自动续期也会暂停。{{if .Admin}} <a href="/unseal">马上解锁</a>{{end}}</div>{{end}}
-{{if .Flash}}<div class="banner ok">{{.Flash}}</div>{{end}}
-{{if .Error}}<div class="banner err">{{.Error}}</div>{{end}}
-<h1>{{.Title}}</h1>
+{{if .User}}
+<div class="page">
+  <aside class="navbar navbar-vertical navbar-expand-lg" data-bs-theme="dark">
+    <div class="container-fluid">
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#sidebar-menu" aria-controls="sidebar-menu" aria-expanded="false" aria-label="打开菜单">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="navbar-brand navbar-brand-autodark">
+        <a href="/" class="text-reset text-decoration-none"><span class="brand-mark">{{icon "shield-lock"}}</span>gamec 面板</a>
+      </div>
+      <div class="collapse navbar-collapse" id="sidebar-menu">
+        <ul class="navbar-nav pt-lg-3">
+          <li class="nav-item{{if eq .Path "/"}} active{{end}}"><a class="nav-link" href="/"><span class="nav-link-icon">{{icon "layout-dashboard"}}</span><span class="nav-link-title">总览</span></a></li>
+          {{if .Channels}}<li class="nav-section">渠道</li>{{end}}
+          {{range .Channels}}
+          <li class="nav-item{{if .Active}} active{{end}}"><a class="nav-link" href="/cluster/{{.ID}}">
+            <span class="nav-link-icon"><span class="nav-dot bg-{{.Color}}"></span></span><span class="nav-link-title">{{.Name}}</span></a></li>
+          {{end}}
+          {{if .Admin}}
+          <li class="nav-section">设置</li>
+          <li class="nav-item{{if hasPrefix .Path "/secrets"}} active{{end}}"><a class="nav-link" href="/secrets"><span class="nav-link-icon">{{icon "world"}}</span><span class="nav-link-title">域名授权</span></a></li>
+          <li class="nav-item{{if hasPrefix .Path "/alerts"}} active{{end}}"><a class="nav-link" href="/alerts"><span class="nav-link-icon">{{icon "bell"}}</span><span class="nav-link-title">告警通知</span></a></li>
+          <li class="nav-item{{if hasPrefix .Path "/ssh"}} active{{end}}"><a class="nav-link" href="/ssh"><span class="nav-link-icon">{{icon "terminal-2"}}</span><span class="nav-link-title">服务器管理</span></a></li>
+          <li class="nav-item{{if hasPrefix .Path "/egress"}} active{{end}}"><a class="nav-link" href="/egress"><span class="nav-link-icon">{{icon "route"}}</span><span class="nav-link-title">出口中转</span></a></li>
+          {{end}}
+          <li class="nav-section">其他</li>
+          <li class="nav-item{{if hasPrefix .Path "/account"}} active{{end}}"><a class="nav-link" href="/account"><span class="nav-link-icon">{{icon "users"}}</span><span class="nav-link-title">{{if .Admin}}账号与密码{{else}}我的账号{{end}}</span></a></li>
+          <li class="nav-item{{if hasPrefix .Path "/audit"}} active{{end}}"><a class="nav-link" href="/audit"><span class="nav-link-icon">{{icon "history"}}</span><span class="nav-link-title">操作记录</span></a></li>
+        </ul>
+        <div class="mt-auto px-3 pb-3 pt-4">
+          <div class="d-flex align-items-center gap-2 text-secondary small">
+            {{icon "user"}}<span class="flex-fill">{{.User}}<span class="d-block">{{if .Admin}}管理员{{else}}只读账号{{end}}</span></span>
+            <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}">
+              <button class="btn btn-sm btn-ghost-secondary" title="退出登录">{{icon "logout"}}退出</button></form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </aside>
+  <div class="page-wrapper">
+    <div class="page-header d-print-none">
+      <div class="container-xl">
+        {{if .Back}}<div class="mb-1"><a href="{{.Back.Href}}" class="text-secondary small text-decoration-none">{{icon "arrow-left"}}{{.Back.Label}}</a></div>{{end}}
+        <h2 class="page-title">{{.Title}}</h2>
+        {{if .Lead}}<div class="text-secondary mt-1">{{.Lead}}</div>{{end}}
+      </div>
+    </div>
+    <div class="page-body">
+      <div class="container-xl">
+        {{if .Sealed}}
+        <div class="alert alert-danger" role="alert">
+          <div class="d-flex gap-3 align-items-center flex-wrap">
+            <div class="flex-fill"><h4 class="alert-title mb-1">{{icon "lock"}} 保险库上锁了</h4>
+              <div class="text-secondary">面板重启后都会这样。上锁期间，面板不能更新名单，也不会自动续期；名单到期后玩家会全部连不上。</div></div>
+            {{if .Admin}}<a href="/unseal" class="btn btn-danger">{{icon "lock-open"}}现在解锁</a>{{end}}
+          </div>
+        </div>
+        {{end}}
+        {{if .Flash}}<div class="alert alert-success" role="status">{{icon "circle-check"}} <span data-msg>{{.Flash}}</span></div>{{end}}
+        {{if .Error}}<div class="alert alert-danger" role="alert">{{icon "alert-circle"}} <span data-msg>{{.Error}}</span></div>{{end}}
+{{else}}
+<div class="page page-center page-auth">
+  <div class="container container-tight py-4">
+    <div class="text-center mb-4"><span class="brand-mark">{{icon "shield-lock"}}</span><span class="h2 align-middle">gamec 面板</span></div>
+    {{if .Error}}<div class="alert alert-danger" role="alert">{{icon "alert-circle"}} <span data-msg>{{.Error}}</span></div>{{end}}
+{{end}}
 {{end}}
 
 {{define "foot"}}
-</main>
+{{if .User}}
+      </div>
+    </div>
+    <footer class="footer footer-transparent d-print-none">
+      <div class="container-xl text-secondary small">页面上的时间都是{{zone}}（UTC+8）。</div>
+    </footer>
+  </div>
+</div>
+<div class="modal modal-blur fade" id="confirm-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-status bg-danger"></div>
+      <div class="modal-body text-center py-4">
+        <div class="text-danger mb-2">{{icon "alert-triangle"}}</div>
+        <h3>确定要这样做吗？</h3>
+        <div class="text-secondary" data-confirm-text></div>
+      </div>
+      <div class="modal-footer">
+        <div class="w-100 d-flex gap-2">
+          <button type="button" class="btn w-100" data-bs-dismiss="modal">取消</button>
+          <button type="button" class="btn btn-danger w-100" data-confirm-ok>确定</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{{else}}
+  </div>
+</div>
+{{end}}
+<script src="/static/vendor/tabler.min.js"></script>
+<script src="/static/app.js"></script>
 </body>
 </html>
 {{end}}
+
+{{/* status shows a node's state as a coloured dot and a word */}}
+{{define "status"}}<span class="status status-{{statusColor .Status}}"><span class="status-dot{{if eq .Status "ok"}} status-dot-animated{{end}}"></span>{{statusWord .Status}}</span>{{end}}

@@ -140,7 +140,7 @@ func newSSHEnv(t *testing.T) *sshEnv {
 	rel := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v0.2.0/SHA256SUMS.txt":
-			fmt.Fprintf(w, "%s  edge-linux-amd64\n%s  nodectl-linux-amd64\n", edgeSHA, nodectlSHA)
+			fmt.Fprintf(w, "%s  edge-linux-amd64\n%s  nodectl-linux-amd64\n%s  gencert-linux-amd64\n", edgeSHA, nodectlSHA, strings.Repeat("c", 64))
 		case "/v0.2.0/edge-linux-amd64":
 			w.Write(edge)
 		case "/v0.2.0/nodectl-linux-amd64":

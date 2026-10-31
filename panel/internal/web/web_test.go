@@ -213,7 +213,7 @@ func TestLoginNeedsAllThreeFactorsAndGivesOneMessage(t *testing.T) {
 		if st != http.StatusUnauthorized || h.Get("Set-Cookie") != "" {
 			t.Errorf("%s: status %d, cookie %q", what, st, h.Get("Set-Cookie"))
 		}
-		msgs = append(msgs, regexp.MustCompile(`banner err">([^<]*)`).FindStringSubmatch(body)[1])
+		msgs = append(msgs, regexp.MustCompile(`data-msg>([^<]*)`).FindStringSubmatch(body)[1])
 	}
 	if msgs[0] != msgs[1] || msgs[1] != msgs[2] {
 		t.Errorf("the message reveals which part was wrong: %v", msgs)
@@ -298,13 +298,26 @@ func TestSecurityHeadersOnEveryResponse(t *testing.T) {
 func TestPagesUseNoInlineScriptOrStyle(t *testing.T) {
 	e := newEnv(t, false)
 	c := e.admin()
-	e.seedCluster("official")
-	for _, p := range []string{"/login", "/", "/cluster/new", "/secrets", "/unseal", "/audit"} {
+	cl := e.seedCluster("official")
+	c.post("/cluster/"+cl.ID+"/node", url.Values{"csrf": {c.csrf()}, "name": {"hk"}, "host": {"1.2.3.4"}, "port": {"30800"}, "pin": {pin}}, nil)
+	nid := e.st.Snapshot().NodesOf(cl.ID)[0].ID
+	scriptTag := regexp.MustCompile(`<script[^>]*>`)
+	for _, p := range []string{"/login", "/", "/cluster/new", "/cluster/" + cl.ID, "/cluster/" + cl.ID + "/node/" + nid, "/secrets", "/unseal", "/audit"} {
 		_, body, _ := c.get(p)
-		for _, bad := range []string{"<script", "style=", "onclick=", "javascript:"} {
-			if strings.Contains(strings.ToLower(body), bad) {
+		low := strings.ToLower(body)
+		for _, bad := range []string{"style=", "onclick=", "onload=", "onsubmit=", "javascript:"} {
+			if strings.Contains(low, bad) {
 				t.Errorf("%s contains %q, which the content security policy would block", p, bad)
 			}
+		}
+		// scripts come only from our own files, never written into the page
+		for _, tag := range scriptTag.FindAllString(low, -1) {
+			if !regexp.MustCompile(`^<script src="/static/[a-z0-9./-]+\.js">$`).MatchString(tag) {
+				t.Errorf("%s has an inline or foreign script: %s", p, tag)
+			}
+		}
+		if n := strings.Count(low, "<script"); n != len(scriptTag.FindAllString(low, -1)) || n != strings.Count(low, `<script src="/static/`) {
+			t.Errorf("%s: scripts that are not plain /static/ files", p)
 		}
 	}
 }

@@ -264,7 +264,7 @@ func (m *Monitor) Decide(active []*store.Node, published map[string]bool) Decisi
 		}
 	}
 	if len(fallback) > 0 {
-		return Decision{Nodes: fallback, Note: "no node qualifies right now; keeping the list that is already published (if every node fails together the panel's own network is the likelier cause)"}
+		return Decision{Nodes: fallback, Note: "现在没有节点通过检查，先保留已经发布的名单（所有节点同时失败时，更可能是面板自己的网络出了问题）"}
 	}
-	return Decision{Note: "no node is ready to be published"}
+	return Decision{Note: "还没有节点通过检查，暂时不能发布名单"}
 }

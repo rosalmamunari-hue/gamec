@@ -54,7 +54,7 @@ func (s *Server) nodeDial() sshx.DialFunc {
 func (s *Server) renderEgress(w http.ResponseWriter, r *http.Request, d egressPageData, flash, errMsg string, status int) {
 	d.Cfg = s.Store.Snapshot().Egress
 	_, d.HasKey, _ = s.panelKey()
-	s.render(w, r, "egress.html", page{Title: "出口跳板机", Flash: flash, Error: errMsg, Data: d}, status)
+	s.render(w, r, "egress.html", page{Title: "出口中转", Lead: "让面板发往节点的所有连接先经过一台中转机，节点就看不到面板的 IP。", Flash: flash, Error: errMsg, Data: d}, status)
 }
 
 func (s *Server) egressPage(w http.ResponseWriter, r *http.Request, _ *auth.Session) {

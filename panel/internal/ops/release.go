@@ -94,3 +94,29 @@ func (r *Releases) Fetch(ctx context.Context, tag, asset string) (Binary, error)
 	}
 	return Binary{Data: data, SHA256: want, Label: tag}, nil
 }
+
+// Latest asks which release is the newest, from the redirect of <repo>/releases/latest. It only reads a
+// name; nothing from that release is used before Fetch has checked it.
+func (r *Releases) Latest(ctx context.Context) (string, error) {
+	base := strings.TrimRight(r.Base, "/")
+	if !strings.HasSuffix(base, "/releases/download") || !strings.HasPrefix(base, "https://") {
+		return "", errors.New("the release address does not look like https://github.com/OWNER/REPO/releases/download")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, strings.TrimSuffix(base, "/download")+"/latest", nil)
+	if err != nil {
+		return "", err
+	}
+	c := *r.client()
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := c.Do(req)
+	if err != nil {
+		return "", err
+	}
+	resp.Body.Close()
+	loc := resp.Header.Get("Location")
+	tag := loc[strings.LastIndex(loc, "/")+1:]
+	if !tagRe.MatchString(tag) {
+		return "", fmt.Errorf("could not tell the newest release from %q", loc)
+	}
+	return tag, nil
+}

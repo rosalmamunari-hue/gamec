@@ -1,0 +1,50 @@
+/* The panel's own touches on top of Tabler. */
+:root {
+  --tblr-font-sans-serif: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    "Noto Sans SC", Roboto, "Helvetica Neue", sans-serif;
+}
+body { font-feature-settings: normal; }
+code { word-break: break-all; }
+.mono { font-family: var(--tblr-font-monospace); font-size: .8125rem; }
+.secret-box { font-family: var(--tblr-font-monospace); font-size: .8125rem; word-break: break-all; user-select: all; }
+pre.script { max-height: 28rem; overflow: auto; font-size: .78rem; }
+
+/* the big "how is this channel doing" block */
+.health { display: flex; gap: 1rem; align-items: flex-start; }
+.health .health-icon { flex: none; width: 3rem; height: 3rem; border-radius: 50%; display: grid; place-items: center; }
+.health .health-icon .icon { width: 1.75rem; height: 1.75rem; stroke-width: 1.75; }
+.health.ok .health-icon { background: var(--tblr-success-lt); color: var(--tblr-success); }
+.health.bad .health-icon { background: var(--tblr-danger-lt); color: var(--tblr-danger); }
+.health.warn .health-icon { background: var(--tblr-warning-lt); color: var(--tblr-warning); }
+.health.setup .health-icon { background: var(--tblr-primary-lt); color: var(--tblr-primary); }
+.health h2 { margin-bottom: .25rem; }
+.health ul { margin: .5rem 0 0; padding-left: 1.1rem; }
+
+/* step-by-step lists (setup, wizards) */
+.todo { list-style: none; margin: 0; padding: 0; counter-reset: todo; }
+.todo li { display: flex; gap: .875rem; align-items: center; padding: .75rem 0; border-top: 1px solid var(--tblr-border-color); counter-increment: todo; }
+.todo li:first-child { border-top: 0; }
+.todo li::before {
+  content: counter(todo); flex: none; width: 1.75rem; height: 1.75rem; border-radius: 50%; display: grid; place-items: center;
+  font-weight: 600; font-size: .8125rem; background: var(--tblr-bg-surface-secondary); color: var(--tblr-secondary);
+}
+.todo li.done::before { content: "\2713"; background: var(--tblr-success-lt); color: var(--tblr-success); }
+.todo li.next::before { background: var(--tblr-primary); color: #fff; }
+.todo li.done .todo-title { color: var(--tblr-secondary); text-decoration: line-through; }
+.todo .todo-body { flex: 1; min-width: 0; }
+.todo .todo-title { font-weight: 600; }
+
+/* a value with a copy button next to it */
+.copy-row { display: flex; gap: .5rem; align-items: center; }
+.copy-row > :first-child { flex: 1; min-width: 0; }
+
+.navbar-vertical .navbar-brand { font-weight: 700; }
+.brand-mark { width: 1.75rem; height: 1.75rem; border-radius: .5rem; background: var(--tblr-primary); color: #fff; display: inline-grid; place-items: center; margin-right: .5rem; }
+.brand-mark .icon { width: 1.1rem; height: 1.1rem; }
+.nav-dot { display: inline-block; width: .5rem; height: .5rem; border-radius: 50%; margin: 0 .375rem; }
+.addr-big { font-family: var(--tblr-font-monospace); font-size: 1.25rem; font-weight: 600; }
+.nav-section { font-size: .6875rem; text-transform: uppercase; letter-spacing: .04em; color: var(--tblr-secondary); padding: 1rem 1rem .25rem; }
+.table td { vertical-align: middle; }
+.empty-sm { padding: 2rem 1rem; }
+.form-hint code { font-size: .75rem; }
+.page-auth { min-height: 100vh; }

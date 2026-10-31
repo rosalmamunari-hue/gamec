@@ -1,14 +1,55 @@
 {{template "head" .}}
-<p class="lead">这里记着谁在什么时候做了什么。每一笔都带着前一笔的指纹，有人偷偷删改就会断掉。</p>
-<p>完整性检查：<b class="{{if eq .Data.Chain "intact"}}okc{{else}}badc{{end}}">{{if eq .Data.Chain "intact"}}没有被改动{{else}}{{.Data.Chain}}{{end}}</b></p>
-<div class="card tablewrap">
-<table>
-  <tr><th>时间 (UTC)</th><th>谁</th><th>来自</th><th>做了什么</th><th>细节</th><th>成功吗</th></tr>
-  {{range .Data.Entries}}
-  <tr class="{{if .OK}}{{else}}failed{{end}}">
-    <td>{{ts .Time}}</td><td>{{.User}}</td><td>{{.IP}}</td><td>{{.Action}}</td><td class="wrap">{{.Detail}}</td><td>{{if .OK}}是{{else}}否{{end}}</td>
-  </tr>
-  {{end}}
-</table>
+{{$d := .Data}}
+<div class="card mb-3">
+  <div class="card-body d-flex align-items-center gap-3 flex-wrap">
+    {{if eq $d.Chain "intact"}}
+      <span class="avatar bg-success-lt">{{icon "shield-check"}}</span>
+      <div class="flex-fill"><div class="fw-bold">记录完整，没有被改动</div><div class="text-secondary small">每一条都带着前一条的指纹，有人偷偷删改就会断开。共 {{$d.Total}} 条。</div></div>
+    {{else}}
+      <span class="avatar bg-danger-lt">{{icon "alert-triangle"}}</span>
+      <div class="flex-fill"><div class="fw-bold text-danger">记录被动过！</div><div class="text-secondary small">{{$d.Chain}}</div></div>
+    {{end}}
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <form method="get" action="/audit" class="row g-2 align-items-end w-100">
+      <div class="col-md-4"><label class="form-label" for="a-q">搜索</label><input class="form-control" id="a-q" name="q" value="{{$d.Q}}" placeholder="节点、IP、渠道…"></div>
+      <div class="col-md-3"><label class="form-label" for="a-kind">类型</label>
+        <select class="form-select" id="a-kind" name="kind">
+          <option value="">全部</option>
+          {{range $d.Kinds}}<option value="{{.Key}}"{{if eq .Key $d.Kind}} selected{{end}}>{{.Label}}</option>{{end}}
+        </select></div>
+      <div class="col-md-3"><label class="form-check mb-2"><input class="form-check-input" type="checkbox" name="failed" value="1"{{if $d.Failed}} checked{{end}}><span class="form-check-label">只看失败的</span></label></div>
+      <div class="col-md-2"><button class="btn w-100">{{icon "list-details"}}筛选</button></div>
+    </form>
+  </div>
+  {{if $d.Entries}}
+  <div class="table-responsive">
+  <table class="table table-vcenter card-table">
+    <thead><tr><th>时间</th><th>谁</th><th>做了什么</th><th>细节</th><th>来自</th></tr></thead>
+    <tbody>
+    {{range $d.Entries}}
+    <tr>
+      <td class="text-nowrap text-secondary small">{{ts .Time}}</td>
+      <td>{{.User}}</td>
+      <td class="text-nowrap">{{if .OK}}<span class="status status-green"><span class="status-dot"></span>{{actionWord .Action}}</span>{{else}}<span class="status status-red"><span class="status-dot"></span>{{actionWord .Action}}</span>{{end}}
+        <div class="text-secondary small mono">{{.Action}}</div></td>
+      <td class="small text-break">{{.Detail}}</td>
+      <td class="text-secondary small mono">{{.IP}}</td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+  </div>
+  <div class="card-footer d-flex align-items-center">
+    <div class="text-secondary small flex-fill">第 {{$d.From}}–{{$d.To}} 条，共 {{$d.Matched}} 条{{if ne $d.Matched $d.Total}}符合条件{{end}}（最新的在最上面）</div>
+    <div class="btn-list">
+      {{if $d.Prev}}<a class="btn btn-sm" href="{{$d.Prev}}">较新</a>{{end}}
+      {{if $d.Next}}<a class="btn btn-sm" href="{{$d.Next}}">较旧</a>{{end}}
+    </div>
+  </div>
+  {{else}}<div class="empty empty-sm"><p class="empty-title">没有符合条件的记录</p></div>{{end}}
 </div>
 {{template "foot" .}}

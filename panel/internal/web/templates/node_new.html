@@ -1,0 +1,127 @@
+{{template "head" .}}
+{{$p := .}}
+{{$d := .Data}}
+{{$c := $d.Cluster}}
+{{$f := $d.Form}}
+
+<div class="card mb-3">
+  <div class="card-body">
+    <ul class="steps steps-counter my-2">
+      <li class="step-item{{if eq $d.Step 1}} active{{end}}">填服务器地址</li>
+      <li class="step-item{{if eq $d.Step 2}} active{{end}}">在服务器上运行脚本</li>
+      <li class="step-item{{if eq $d.Step 3}} active{{end}}">核对指纹，完成</li>
+    </ul>
+  </div>
+</div>
+
+{{define "wizard-hidden"}}
+<input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="host" value="{{.Host}}"><input type="hidden" name="port" value="{{.Port}}">
+<input type="hidden" name="ssh_port" value="{{.SSHPort}}"><input type="hidden" name="tag" value="{{.Tag}}"><input type="hidden" name="origin" value="{{.Origin}}"><input type="hidden" name="from" value="{{.From}}">
+{{end}}
+
+{{if eq $d.Step 1}}
+<div class="row row-cards">
+<div class="col-lg-8">
+{{if not $d.Ready}}<div class="alert alert-warning">{{icon "alert-triangle"}} {{$d.Missing}}</div>{{end}}
+<form method="post" action="/cluster/{{$c.ID}}/node/new/script" class="card">
+  <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+  <div class="card-header"><div><h3 class="card-title">新服务器</h3><div class="card-subtitle">先买一台全新的 Linux 服务器（Ubuntu / Debian 都行），记下它的公网 IP。</div></div></div>
+  <div class="card-body">
+    <div class="row">
+      <div class="col-md-6 mb-3"><label class="form-label required" for="w-host">服务器公网 IP</label><input class="form-control mono" id="w-host" name="host" value="{{$f.Host}}" placeholder="203.0.113.11" required autofocus></div>
+      <div class="col-md-6 mb-3"><label class="form-label required" for="w-name">给它起个名字</label><input class="form-control" id="w-name" name="name" value="{{$f.Name}}" required><div class="form-hint">方便你认，比如 hk-3。</div></div>
+      <div class="col-md-6 mb-3"><label class="form-label required" for="w-port">玩家连接的端口</label><input class="form-control" id="w-port" name="port" type="number" min="1024" max="65535" value="{{$f.Port}}" required>
+        <div class="form-hint">已经帮你随机选好了。<b>记得在云服务商的安全组里放行这个端口（TCP）。</b></div></div>
+      <div class="col-md-6 mb-3"><label class="form-label required" for="w-origin">源站地址</label><input class="form-control mono" id="w-origin" name="origin" value="{{$f.Origin}}" placeholder="203.0.113.50:10443" required>
+        <div class="form-hint">游戏服务器的 IP:端口。{{if $c.Origin}}已经按渠道设置填好了。{{else}}会顺便存进渠道设置。{{end}}</div></div>
+    </div>
+    <div class="accordion" id="w-more">
+      <div class="accordion-item">
+        <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#w-more-body" aria-expanded="false">高级选项（一般不用改）</button></h2>
+        <div id="w-more-body" class="accordion-collapse collapse" data-bs-parent="#w-more">
+          <div class="accordion-body">
+            <div class="row">
+              <div class="col-md-4 mb-3"><label class="form-label" for="w-ssh">SSH 端口</label><input class="form-control" id="w-ssh" name="ssh_port" type="number" value="{{$f.SSHPort}}" required></div>
+              <div class="col-md-4 mb-3"><label class="form-label" for="w-tag">节点程序版本</label><input class="form-control" id="w-tag" name="tag" value="{{$f.Tag}}" placeholder="v0.4.0" required><div class="form-hint">默认是最新发布的版本。</div></div>
+              <div class="col-md-4 mb-3"><label class="form-label" for="w-from">只允许从这个地址管理</label><input class="form-control mono" id="w-from" name="from" value="{{$f.From}}" placeholder="面板的 IP"><div class="form-hint">建议填面板服务器的 IP（用了出口中转就填中转机的 IP，已自动填好）。</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="card-footer text-end"><button class="btn btn-primary"{{if not $d.Ready}} disabled{{end}} data-busy="生成中…">下一步：生成安装脚本{{icon "arrow-right"}}</button></div>
+</form>
+</div>
+<div class="col-lg-4">
+<div class="card">
+  <div class="card-header"><h3 class="card-title">节点已经装好了？</h3></div>
+  <div class="card-body">
+    <p class="text-secondary small">如果你是自己装的节点，知道它的证书指纹，可以直接手动加入。远程管理之后再在节点页里设置。</p>
+    <form method="post" action="/cluster/{{$c.ID}}/node">
+      <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+      <div class="mb-2"><label class="form-label" for="m-name">名称</label><input class="form-control" id="m-name" name="name" required></div>
+      <div class="mb-2"><label class="form-label" for="m-host">IP 或域名</label><input class="form-control mono" id="m-host" name="host" required></div>
+      <div class="mb-2"><label class="form-label" for="m-port">端口</label><input class="form-control" id="m-port" name="port" type="number" required></div>
+      <div class="mb-3"><label class="form-label" for="m-pin">证书指纹</label><input class="form-control mono" id="m-pin" name="pin" placeholder="44 个字符，以 = 结尾" required></div>
+      <button class="btn w-100">手动加入</button>
+    </form>
+  </div>
+</div>
+</div>
+</div>
+{{end}}
+
+{{if eq $d.Step 2}}
+<div class="card mb-3">
+  <div class="card-header"><div><h3 class="card-title">用 root 登录 {{$f.Host}}，把下面整段粘贴进去运行</h3>
+    <div class="card-subtitle">它会装好节点程序、在服务器上生成证书、设置开机自启，并开好面板的远程管理。大约 1 分钟。</div></div>
+    <div class="card-actions"><button type="button" class="btn btn-primary" data-copy="#install-script">{{icon "copy"}}<span>复制脚本</span></button></div>
+  </div>
+  <div class="card-body">
+    <div class="alert alert-warning">{{icon "key"}} 脚本里有这个渠道的节点密钥。<b>只粘贴到这台新服务器上</b>，不要发到聊天软件里。</div>
+    <ol class="mb-3">
+      <li>用 SSH 以 root 登录 <code>{{$f.Host}}</code>（云服务商网页上的「远程连接」也可以）。</li>
+      <li>点上面的「复制脚本」，在服务器里粘贴，回车。</li>
+      <li>最后会印出两行指纹（<code>node pin</code> 和 <code>SSH key</code>），先别关窗口，下一步要对照。</li>
+      <li>在云服务商的安全组里放行 TCP <b>{{$f.Port}}</b> 端口。</li>
+    </ol>
+    <pre class="script" id="install-script">{{$d.Script}}</pre>
+  </div>
+  <div class="card-footer d-flex justify-content-between">
+    <a href="/cluster/{{$c.ID}}/node/new" class="btn btn-ghost-secondary">重新填</a>
+    <form method="post" action="/cluster/{{$c.ID}}/node/new/check"><input type="hidden" name="csrf" value="{{$p.CSRF}}">{{template "wizard-hidden" $f}}
+      <button class="btn btn-primary" data-busy="正在连接新服务器…">脚本跑完了，下一步{{icon "arrow-right"}}</button></form>
+  </div>
+</div>
+{{end}}
+
+{{if eq $d.Step 3}}
+<div class="card">
+  <div class="card-header"><h3 class="card-title">核对指纹</h3></div>
+  {{if $d.Problem}}
+  <div class="card-body">
+    <div class="alert alert-danger">{{icon "alert-circle"}} {{$d.Problem}}</div>
+    <p class="text-secondary">常见原因：脚本还没跑完或中途报错；云服务商的安全组没放行端口 {{$f.Port}}；IP 填错了。处理好之后再试一次。</p>
+  </div>
+  <div class="card-footer d-flex justify-content-between">
+    <form method="post" action="/cluster/{{$c.ID}}/node/new/script"><input type="hidden" name="csrf" value="{{$p.CSRF}}">{{template "wizard-hidden" $f}}<button class="btn btn-ghost-secondary">{{icon "arrow-left"}}再看一次脚本</button></form>
+    <form method="post" action="/cluster/{{$c.ID}}/node/new/check"><input type="hidden" name="csrf" value="{{$p.CSRF}}">{{template "wizard-hidden" $f}}<button class="btn btn-primary" data-busy="正在连接…">{{icon "refresh"}}再试一次</button></form>
+  </div>
+  {{else}}
+  <div class="card-body">
+    <p>面板刚刚连上了 <span class="mono">{{$f.Host}}</span>，读到下面两个指纹。<b>请和脚本最后印出的两行逐字对照</b>，一模一样说明连的就是你的服务器，中间没人冒充。</p>
+    <div class="mb-3"><div class="form-label">节点证书指纹（对照 <code>node pin</code>）</div><div class="form-control secret-box">{{$d.Pin}}</div></div>
+    <div class="mb-3"><div class="form-label">SSH 指纹（对照 <code>SSH key</code>）</div><div class="form-control secret-box">{{$d.HostKey}}</div></div>
+    <div class="text-secondary small">对不上的话不要继续：可能 IP 填错了，也可能有人在中间拦截。</div>
+  </div>
+  <div class="card-footer d-flex justify-content-between">
+    <a href="/cluster/{{$c.ID}}" class="btn btn-ghost-secondary">对不上，取消</a>
+    <form method="post" action="/cluster/{{$c.ID}}/node/new/finish"><input type="hidden" name="csrf" value="{{$p.CSRF}}">{{template "wizard-hidden" $f}}
+      <input type="hidden" name="pin" value="{{$d.Pin}}"><input type="hidden" name="host_key" value="{{$d.HostKey}}">
+      <button class="btn btn-success" data-busy="加入中…">{{icon "check"}}两个都一模一样，加入节点</button></form>
+  </div>
+  {{end}}
+</div>
+{{end}}
+{{template "foot" .}}

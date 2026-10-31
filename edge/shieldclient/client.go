@@ -72,6 +72,46 @@ func DialVia(dial DialFunc, addr, pin string, timeout time.Duration) (*tls.Conn,
 	return c, time.Since(t0), nil
 }
 
+// FetchPinVia connects to a node without checking its key and returns the pin of the key it presents. It is
+// for showing an administrator what a newly installed node presents, to compare with what the node's own
+// installer printed; a client must never trust a pin learnt this way.
+func FetchPinVia(dial DialFunc, addr string, timeout time.Duration) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	raw, err := dial(ctx, "tcp", addr)
+	if err != nil {
+		return "", err
+	}
+	defer raw.Close()
+	var pin string
+	cfg := &tls.Config{
+		MinVersion:         tls.VersionTLS13,
+		InsecureSkipVerify: true, // only reading the key, to be confirmed by a person
+		VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error {
+			if len(raw) == 0 {
+				return errors.New("no certificate")
+			}
+			cert, err := x509.ParseCertificate(raw[0])
+			if err != nil {
+				return err
+			}
+			spki, err := x509.MarshalPKIXPublicKey(cert.PublicKey)
+			if err != nil {
+				return err
+			}
+			sum := sha256.Sum256(spki)
+			pin = base64.StdEncoding.EncodeToString(sum[:])
+			return nil
+		},
+	}
+	c := tls.Client(raw, cfg)
+	if err := c.HandshakeContext(ctx); err != nil {
+		return "", err
+	}
+	c.Close()
+	return pin, nil
+}
+
 // Dial is DialVia from this machine.
 func Dial(addr, pin string, timeout time.Duration) (*tls.Conn, time.Duration, error) {
 	return DialVia(DirectDial, addr, pin, timeout)

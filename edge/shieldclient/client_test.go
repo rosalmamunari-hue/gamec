@@ -90,6 +90,18 @@ func TestPinnedDialAcceptsOnlyTheRightKey(t *testing.T) {
 	}
 }
 
+func TestFetchPinReadsTheKeyTheNodePresents(t *testing.T) {
+	n := startFakeNode(t)
+	via := &counting{}
+	got, err := FetchPinVia(via.dial, n.addr, 3*time.Second)
+	if err != nil || got != n.pin || via.n.Load() != 1 {
+		t.Fatalf("pin %q (want %q), err %v, dials %d", got, n.pin, err, via.n.Load())
+	}
+	if _, err := FetchPinVia(via.dial, "127.0.0.1:1", time.Second); err == nil {
+		t.Fatal("nothing listens there")
+	}
+}
+
 func TestEveryConnectionGoesThroughTheGivenDialer(t *testing.T) {
 	n := startFakeNode(t)
 	via := &counting{}

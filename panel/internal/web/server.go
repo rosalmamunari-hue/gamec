@@ -63,9 +63,16 @@ type Server struct {
 	// front). Only turn it on when the panel is reachable only through that proxy.
 	TrustProxy bool
 
-	tpl  *template.Template
-	lim  *limiter
-	once sync.Once
+	// FetchPin reads the TLS pin a node presents (for the add-a-node wizard); nil means connect to it.
+	FetchPin func(addr string, timeout time.Duration) (string, error)
+	// DialOrigin connects to an origin to see whether it is open to the internet; nil means directly.
+	DialOrigin dialOriginFunc
+
+	tpl     *template.Template
+	lim     *limiter
+	once    sync.Once
+	origins originChecks
+	latest  latestCache
 }
 
 const cookieName = "gc_session"
@@ -84,12 +91,24 @@ func (s *Server) now() time.Time {
 func (s *Server) init() {
 	s.once.Do(func() {
 		funcs := template.FuncMap{
-			"ago":      func(t time.Time) string { return humanAgo(s.now(), t) },
-			"until":    func(unix int64) string { return humanUntil(s.now(), unix) },
-			"ms":       func(d time.Duration) string { return fmt.Sprintf("%d ms", d.Milliseconds()) },
-			"ts":       func(t time.Time) string { return t.UTC().Format("2006-01-02 15:04:05") },
-			"unixTime": func(u int64) time.Time { return time.Unix(u, 0) },
-			"list":     func(v ...string) []string { return v },
+			"ago":          func(t time.Time) string { return humanAgo(s.now(), t) },
+			"until":        func(unix int64) string { return humanUntil(s.now(), unix) },
+			"ms":           func(d time.Duration) string { return fmt.Sprintf("%d ms", d.Milliseconds()) },
+			"ts":           showTime,
+			"clock":        showClock,
+			"zone":         func() string { return zoneLabel },
+			"unixTime":     func(u int64) time.Time { return time.Unix(u, 0) },
+			"list":         func(v ...string) []string { return v },
+			"icon":         icon,
+			"hasPrefix":    strings.HasPrefix,
+			"statusColor":  statusColor,
+			"statusWord":   statusWord,
+			"actionWord":   actionWord,
+			"add":          func(a, b int) int { return a + b },
+			"levelColor":   levelColor,
+			"providerName": providerName,
+			"daysLeft":     func(exp int64) int { return daysLeft(s.now(), exp) },
+			"dict":         dict,
 		}
 		s.tpl = template.Must(template.New("").Funcs(funcs).ParseFS(assets, "templates/*.html"))
 		s.lim = newLimiter(10, 10*time.Minute)
@@ -98,12 +117,12 @@ func (s *Server) init() {
 
 func humanAgo(now, t time.Time) string {
 	if t.IsZero() {
-		return "never"
+		return "从来没有"
 	}
 	d := now.Sub(t)
 	switch {
 	case d < time.Minute:
-		return "just now"
+		return "刚刚"
 	case d < time.Hour:
 		return fmt.Sprintf("%d 分钟前", int(d.Minutes()))
 	case d < 48*time.Hour:
@@ -119,7 +138,7 @@ func humanUntil(now time.Time, unix int64) string {
 	d := time.Unix(unix, 0).Sub(now)
 	switch {
 	case d <= 0:
-		return "EXPIRED"
+		return "已经过期"
 	case d < 48*time.Hour:
 		return fmt.Sprintf("剩 %d 小时", int(d.Hours()))
 	}
@@ -184,6 +203,8 @@ type ctxKey struct{}
 
 type page struct {
 	Title  string
+	Lead   string    // one line under the title
+	Back   *backLink // "back to ..." above the title
 	User   string
 	Admin  bool
 	CSRF   string
@@ -191,6 +212,16 @@ type page struct {
 	Flash  string
 	Error  string
 	Data   any
+
+	Path     string       // for highlighting the menu
+	Channels []navChannel // the channels in the menu, with a dot for how each is doing
+}
+
+type backLink struct{ Href, Label string }
+
+type navChannel struct {
+	ID, Name, Color string
+	Active          bool
 }
 
 func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, p page, status int) {
@@ -199,6 +230,16 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, p p
 		p.User, p.Admin, p.CSRF = sess.User, sess.Role == auth.Admin, sess.CSRF
 	}
 	p.Sealed = s.Vault.Sealed()
+	p.Path = r.URL.Path
+	if sess != nil {
+		st := s.Store.Snapshot()
+		for _, c := range st.Clusters {
+			row := s.clusterRow(st, c)
+			p.Channels = append(p.Channels, navChannel{ID: c.ID, Name: c.Name, Color: levelColor(row.Level),
+				Active: strings.HasPrefix(p.Path, "/cluster/"+c.ID)})
+		}
+		sort.Slice(p.Channels, func(i, j int) bool { return p.Channels[i].Name < p.Channels[j].Name })
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	if err := s.tpl.ExecuteTemplate(w, name, p); err != nil {
@@ -221,7 +262,7 @@ func (s *Server) log(r *http.Request, action, detail string, ok bool) {
 func (s *Server) headers(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
-		h.Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+		h.Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "same-origin") // not "no-referrer": that makes Firefox send Origin: null on our own forms
@@ -312,6 +353,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /cluster/{id}/seal", s.need(true, s.sealToggle))
 	mux.HandleFunc("POST /cluster/{id}/target", s.need(true, s.targetAdd))
 	mux.HandleFunc("POST /cluster/{id}/target/{idx}/delete", s.need(true, s.targetDelete))
+	mux.HandleFunc("POST /cluster/{id}/origin-check", s.need(true, s.originCheckNow))
 
 	mux.HandleFunc("GET /secrets", s.need(true, s.secretsPage))
 	mux.HandleFunc("POST /secrets", s.need(true, s.secretSet))
@@ -320,6 +362,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /unseal", s.need(true, s.unsealSubmit))
 	mux.HandleFunc("GET /audit", s.need(false, s.auditPage))
 	s.routesSSH(mux)
+	s.routesEdit(mux)
+	s.routesWizard(mux)
 	s.routesEgress(mux)
 	return s.headers(mux)
 }
@@ -385,6 +429,13 @@ type nodeView struct {
 	Status  string // ok | fail | ejected | paused | off | unknown
 	Detail  string
 	Latency string
+	Checked time.Time     // when it was last probed
+	Recent  []recentProbe // oldest first, for the row of coloured blocks
+}
+
+type recentProbe struct {
+	OK   bool
+	Text string
 }
 
 func (s *Server) nodeViews(st store.State, c *store.Cluster) []nodeView {
@@ -395,33 +446,59 @@ func (s *Server) nodeViews(st store.State, c *store.Cluster) []nodeView {
 		h := s.Mon.Health(n.ID)
 		switch {
 		case !n.Enabled:
-			v.Status, v.Detail = "off", "已关闭"
+			v.Status, v.Detail = "off", "已停用，不会出现在名单里"
 		case now.Before(n.DisabledUntil):
-			v.Status, v.Detail = "paused", "暂停至 "+n.DisabledUntil.UTC().Format("15:04 UTC")
+			v.Status, v.Detail = "paused", "暂停到 "+showClock(n.DisabledUntil)+"，到时自动恢复"
 		case !h.Seen:
-			v.Status, v.Detail = "unknown", "还没检查过"
+			v.Status, v.Detail = "unknown", "还没检查过，一分钟内会检查"
 		case h.Ejected:
-			v.Status, v.Detail = "ejected", fmt.Sprintf("已从名单拿掉：连续 %d 次检查失败（%s）", h.ConsecFail, h.Last.Err)
+			v.Status, v.Detail = "ejected", fmt.Sprintf("连续 %d 次检查失败，已从名单拿掉：%s", h.ConsecFail, probeProblem(h.Last))
 		case h.Last.OK:
-			v.Status, v.Detail, v.Latency = "ok", "运作正常", fmt.Sprintf("%d ms", h.Last.Handshake.Milliseconds())
+			v.Status, v.Detail = "ok", "正常"
 		default:
-			v.Status, v.Detail = "fail", fmt.Sprintf("失败中（连续 %d 次）：%s", h.ConsecFail, h.Last.Err)
+			v.Status, v.Detail = "fail", fmt.Sprintf("检查失败（连续 %d 次）：%s", h.ConsecFail, probeProblem(h.Last))
+		}
+		if h.Seen {
+			v.Checked = h.Last.At
+			if h.Last.OK {
+				v.Latency = fmt.Sprintf("%d ms", h.Last.Handshake.Milliseconds())
+			}
+		}
+		for _, r := range h.Recent {
+			t := showClock(r.At) + " 正常"
+			if !r.OK {
+				t = showClock(r.At) + " 失败：" + probeProblem(r)
+			}
+			v.Recent = append(v.Recent, recentProbe{OK: r.OK, Text: t})
 		}
 		out = append(out, v)
 	}
 	return out
 }
 
+// problem is something wrong with a channel, said so that a person knows what to do about it.
+type problem struct {
+	Text string
+	Bad  bool   // players are (or soon will be) affected, rather than something to keep an eye on
+	Href string // where to fix it, if anywhere
+	Link string
+}
+
 type clusterRow struct {
-	C       *store.Cluster
-	Nodes   []nodeView
-	OK, All int
-	Expiry  string
-	Alerts  []string
-	Note    string
-	Steps   []step
-	Next    *step
-	Left    int
+	C        *store.Cluster
+	Nodes    []nodeView
+	OK, All  int
+	Expiry   string
+	Problems []problem
+	Note     string
+	Steps    []step
+	Next     *step
+	Left     int
+
+	// Level is the one-word state of the channel: ok, warn (something to look at), bad (players are
+	// affected or soon will be) or setup (not finished yet). Headline says it in a sentence.
+	Level    string
+	Headline string
 }
 
 func (s *Server) clusterRow(st store.State, c *store.Cluster) clusterRow {
@@ -434,22 +511,49 @@ func (s *Server) clusterRow(st store.State, c *store.Cluster) clusterRow {
 	}
 	row.Expiry = humanUntil(s.now(), c.Last.Exp)
 	now := s.now()
+	page := "/cluster/" + c.ID
+	add := func(bad bool, text, href, link string) {
+		row.Problems = append(row.Problems, problem{Text: text, Bad: bad, Href: href, Link: link})
+	}
+	if s.Vault.Sealed() {
+		add(true, "保险库上锁了：面板不能更新名单，也不会自动续期。", "/unseal", "去解锁")
+	}
 	switch {
 	case c.Last.At.IsZero():
-		row.Alerts = append(row.Alerts, "还没有把名单写进域名，App 现在找不到节点")
+		// covered by the setup steps
 	case time.Unix(c.Last.Exp, 0).Before(now):
-		row.Alerts = append(row.Alerts, "名单已经过期，玩家找不到节点！请立刻更新名单")
+		add(true, "名单已经过期，玩家找不到任何节点！请马上更新名单。", page+"#publish", "去更新")
 	case time.Unix(c.Last.Exp, 0).Sub(now) < time.Duration(c.RenewBeforeDays)*24*time.Hour:
-		row.Alerts = append(row.Alerts, "名单已进入续期期间")
+		if c.AutoPublish && !s.Vault.Sealed() {
+			add(false, "名单快到期了（"+row.Expiry+"），面板会自动续期。", "", "")
+		} else {
+			add(true, "名单快到期了（"+row.Expiry+"），而自动维护没在运行。请手动更新一次。", page+"#publish", "去更新")
+		}
 	}
 	if c.Last.Manual {
-		row.Alerts = append(row.Alerts, "有手动目标在等你把记录贴进域名")
+		add(true, "有一个「手动」域名在等你把记录贴进 DNS。", page+"#publish", "查看记录")
 	}
 	if !c.Last.At.IsZero() && !c.Last.Manual && !c.Last.Verified {
-		row.Alerts = append(row.Alerts, "名单写进去了，但从外面读不回来（可能域名还没生效，或 DNS 有缓存）")
+		add(false, "名单写进去了，但从外面还读不到（可能 DNS 还没生效）。几分钟后再更新一次看看。", page+"#publish", "去看看")
 	}
 	if row.All > 0 && row.OK == 0 {
-		row.Alerts = append(row.Alerts, "没有任何节点通过检查")
+		add(true, "没有任何节点通过检查，玩家可能连不上。", page+"#nodes", "看节点")
+	} else if row.OK < row.All {
+		bad := 0
+		for _, n := range row.Nodes {
+			if n.Status == "fail" || n.Status == "ejected" {
+				bad++
+			}
+		}
+		if bad > 0 {
+			add(false, fmt.Sprintf("%d 个节点检查失败，玩家会自动用其他节点。", bad), page+"#nodes", "看节点")
+		}
+	}
+	if o := s.originState(c.ID); o.Open {
+		add(false, "源站 "+c.Origin+" 对公网开放：别人知道地址就能绕过节点直接打源站。请把源站防火墙改成只放行节点的 IP。", page+"#settings", "详情")
+	}
+	if c.AutoPublish && row.Note != "" && strings.HasPrefix(row.Note, "自动更新名单失败") {
+		add(true, row.Note, page+"#publish", "去看看")
 	}
 	row.Steps = s.steps(st, c, row)
 	row.Next = nextStep(row.Steps)
@@ -457,6 +561,20 @@ func (s *Server) clusterRow(st store.State, c *store.Cluster) clusterRow {
 		if !st.Done {
 			row.Left++
 		}
+	}
+	bad, warn := false, len(row.Problems) > 0
+	for _, p := range row.Problems {
+		bad = bad || p.Bad
+	}
+	switch {
+	case c.Last.At.IsZero():
+		row.Level, row.Headline = "setup", fmt.Sprintf("还没设置好：还差 %d 步，玩家才能用这个渠道", row.Left)
+	case bad:
+		row.Level, row.Headline = "bad", "有问题，需要你处理"
+	case warn:
+		row.Level, row.Headline = "warn", "玩家可以连接，但有地方要留意"
+	default:
+		row.Level, row.Headline = "ok", "一切正常，玩家可以连接"
 	}
 	return row
 }
@@ -468,13 +586,14 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request, _ *auth.Sessi
 		rows = append(rows, s.clusterRow(st, c))
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].C.Name < rows[j].C.Name })
-	s.render(w, r, "dashboard.html", page{Title: "渠道", Flash: r.URL.Query().Get("ok"), Data: rows}, http.StatusOK)
+	s.render(w, r, "dashboard.html", page{Title: "总览", Lead: "每个渠道是一组独立的节点和域名（比如一个渠道服），这里一眼看出每个渠道好不好。", Flash: r.URL.Query().Get("ok"), Data: rows}, http.StatusOK)
 }
 
 type clusterPageData struct {
 	Row     clusterRow
-	Others  []string
 	SealKey string // shown only while the cluster encrypts its list and the vault is unlocked
+	Origin  originResult
+	Latest  string // the newest release, to suggest for upgrades
 }
 
 func (s *Server) clusterPage(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
@@ -491,12 +610,12 @@ func (s *Server) renderCluster(w http.ResponseWriter, r *http.Request, id, flash
 	if flash == "" {
 		flash = r.URL.Query().Get("ok")
 	}
-	data := clusterPageData{Row: s.clusterRow(st, c)}
+	data := clusterPageData{Row: s.clusterRow(st, c), Origin: s.originState(id), Latest: s.latestRelease()}
 	// the key is a secret like the others: read-only accounts see that the list is sealed, not the key
 	if sess, _ := r.Context().Value(ctxKey{}).(*auth.Session); c.Sealed && !s.Vault.Sealed() && sess != nil && sess.Role == auth.Admin {
 		data.SealKey, _, _ = s.Vault.Get(engine.SealKeyName(id))
 	}
-	s.render(w, r, "cluster.html", page{Title: c.Name, Flash: flash, Error: errMsg, Data: data}, status)
+	s.render(w, r, "cluster.html", page{Title: c.Name, Lead: clusterLead(c), Flash: flash, Error: errMsg, Data: data}, status)
 }
 
 // ---------------------------------------------------------------- creating a cluster
@@ -508,14 +627,14 @@ type createdData struct {
 }
 
 func (s *Server) clusterNewForm(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
-	s.render(w, r, "cluster_new.html", page{Title: "添加渠道"}, http.StatusOK)
+	s.render(w, r, "cluster_new.html", page{Title: "添加渠道", Back: &backLink{"/", "返回总览"}}, http.StatusOK)
 }
 
 var clusterNameRe = regexp.MustCompile(`^[^<>"'&\x00-\x1f]{1,60}$`)
 
 func (s *Server) clusterCreate(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
 	fail := func(msg string) {
-		s.render(w, r, "cluster_new.html", page{Title: "添加渠道", Error: msg}, http.StatusBadRequest)
+		s.render(w, r, "cluster_new.html", page{Title: "添加渠道", Back: &backLink{"/", "返回总览"}, Error: msg}, http.StatusBadRequest)
 	}
 	if s.Vault.Sealed() {
 		fail("保险库是上锁状态；请先解锁，新渠道需要把密钥存进去。")
@@ -783,20 +902,12 @@ func (s *Server) sealToggle(w http.ResponseWriter, r *http.Request, _ *auth.Sess
 
 func (s *Server) targetAdd(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
 	id := r.PathValue("id")
-	t := store.DNSTarget{Provider: r.FormValue("provider"), Zone: strings.ToLower(strings.TrimSpace(r.FormValue("zone"))),
-		Name: strings.ToLower(strings.TrimSpace(r.FormValue("dns_name"))), CredRef: strings.TrimSpace(r.FormValue("cred_ref"))}
-	if t.Provider != "manual" && t.CredRef == "" {
-		t.CredRef = "main"
+	t, err := s.targetFromForm(r)
+	if err != nil {
+		s.renderCluster(w, r, id, "", err.Error(), http.StatusBadRequest)
+		return
 	}
-	if t.Provider == "cloudflare" && t.Zone == "" { // Cloudflare: the panel finds the domain itself, no zone or id to type
-		zone, zerr := s.detectZone(r.Context(), t.CredRef, t.Name)
-		if zerr != nil {
-			s.renderCluster(w, r, id, "", zerr.Error(), http.StatusBadRequest)
-			return
-		}
-		t.Zone = zone
-	}
-	err := s.Store.Mutate(func(st *store.State) error {
+	err = s.Store.Mutate(func(st *store.State) error {
 		c := st.Cluster(id)
 		if c == nil {
 			return fmt.Errorf("没有这个渠道")
@@ -805,7 +916,7 @@ func (s *Server) targetAdd(w http.ResponseWriter, r *http.Request, _ *auth.Sessi
 		return nil
 	})
 	if err != nil {
-		s.renderCluster(w, r, id, "", err.Error(), http.StatusBadRequest)
+		s.renderCluster(w, r, id, "", friendlyStoreError(err), http.StatusBadRequest)
 		return
 	}
 	s.log(r, "target-add", fmt.Sprintf("cluster=%s %s %s", id, t.Provider, t.Name), true)
@@ -815,10 +926,17 @@ func (s *Server) targetAdd(w http.ResponseWriter, r *http.Request, _ *auth.Sessi
 func (s *Server) targetDelete(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
 	id := r.PathValue("id")
 	idx, _ := strconv.Atoi(r.PathValue("idx"))
+	name := strings.TrimSpace(r.FormValue("name"))
 	err := s.Store.Mutate(func(st *store.State) error {
 		c := st.Cluster(id)
 		if c == nil || idx < 0 || idx >= len(c.Targets) {
-			return fmt.Errorf("没有这个 DNS 目标")
+			return fmt.Errorf("没有这个域名")
+		}
+		if name != "" && c.Targets[idx].Name != name { // the list changed since the page was shown
+			return fmt.Errorf("域名列表刚刚被改过，没有移除任何东西。请刷新页面再试")
+		}
+		if len(c.Targets) == 1 {
+			return fmt.Errorf("这是最后一个域名，不能移除：App 至少要有一个地方读名单。可以先加一个新的再移除它")
 		}
 		c.Targets = append(c.Targets[:idx], c.Targets[idx+1:]...)
 		return nil
@@ -827,8 +945,8 @@ func (s *Server) targetDelete(w http.ResponseWriter, r *http.Request, _ *auth.Se
 		s.renderCluster(w, r, id, "", err.Error(), http.StatusBadRequest)
 		return
 	}
-	s.log(r, "target-delete", fmt.Sprintf("cluster=%s index=%d", id, idx), true)
-	s.back(w, r, id, "DNS 目标已移除。")
+	s.log(r, "target-delete", fmt.Sprintf("cluster=%s index=%d name=%s", id, idx, safe(name)), true)
+	s.back(w, r, id, "域名已移除。")
 }
 
 // ---------------------------------------------------------------- secrets, unseal, audit
@@ -839,31 +957,110 @@ var (
 )
 
 func (s *Server) unsealForm(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
-	s.render(w, r, "unseal.html", page{Title: "解锁"}, http.StatusOK)
+	s.render(w, r, "unseal.html", page{Title: "解锁保险库"}, http.StatusOK)
 }
 
 func (s *Server) unsealSubmit(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
 	if !s.lim.allow("unseal:"+s.clientIP(r), s.now()) {
-		s.render(w, r, "unseal.html", page{Title: "解锁", Error: "尝试次数过多。"}, http.StatusTooManyRequests)
+		s.render(w, r, "unseal.html", page{Title: "解锁保险库", Error: "尝试次数过多。"}, http.StatusTooManyRequests)
 		return
 	}
 	if err := s.Vault.Unseal(r.FormValue("passphrase")); err != nil {
 		s.log(r, "unseal", "failed", false)
-		s.render(w, r, "unseal.html", page{Title: "解锁", Error: "这个口令打不开保险库。"}, http.StatusUnauthorized)
+		s.render(w, r, "unseal.html", page{Title: "解锁保险库", Error: "这个口令打不开保险库。"}, http.StatusUnauthorized)
 		return
 	}
 	s.log(r, "unseal", "ok", true)
 	http.Redirect(w, r, "/?ok="+url.QueryEscape("保险库已解锁。"), http.StatusSeeOther)
 }
 
-func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
-	es, _ := audit.Tail(s.AuditPath, 200)
-	intact := "intact"
-	if _, err := audit.Verify(s.AuditPath); err != nil {
-		intact = "BROKEN: " + err.Error()
+type auditKind struct{ Key, Label string }
+
+var auditKinds = []auditKind{{"login", "登录"}, {"node", "节点"}, {"publish", "名单"}, {"dns", "域名和授权"},
+	{"settings", "设置和账号"}, {"security", "被拒绝的请求"}, {"alert", "告警"}}
+
+// auditKindOf groups an action code for the filter on the audit page.
+func auditKindOf(action string) string {
+	switch {
+	case action == "csrf-rejected" || action == "forbidden" || action == "login-throttled":
+		return "security"
+	case strings.HasPrefix(action, "login") || action == "logout" || action == "unseal" || action == "start":
+		return "login"
+	case strings.HasPrefix(action, "node-") || strings.HasPrefix(action, "ssh-") || action == "upgrade-all" || action == "hostkey-trust":
+		return "node"
+	case action == "publish" || action == "auto-publish" || action == "seal-list":
+		return "publish"
+	case strings.HasPrefix(action, "target-") || strings.HasPrefix(action, "secret-") || action == "set-secret" || action == "get-secret":
+		return "dns"
+	case action == "alert":
+		return "alert"
 	}
-	s.render(w, r, "audit.html", page{Title: "稽核日志", Data: struct {
-		Entries []audit.Entry
-		Chain   string
-	}{es, intact}}, http.StatusOK)
+	return "settings"
+}
+
+const auditPerPage = 100
+
+func (s *Server) auditPage(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
+	all, _ := audit.Tail(s.AuditPath, 1<<20) // newest first
+	chain := "intact"
+	if _, err := audit.Verify(s.AuditPath); err != nil {
+		chain = "BROKEN: " + err.Error()
+	}
+	q, kind, failed := strings.TrimSpace(r.URL.Query().Get("q")), r.URL.Query().Get("kind"), r.URL.Query().Get("failed") == "1"
+	var hits []audit.Entry
+	for _, e := range all {
+		if kind != "" && auditKindOf(e.Action) != kind || failed && e.OK {
+			continue
+		}
+		if q != "" && !strings.Contains(strings.ToLower(e.User+" "+e.IP+" "+e.Action+" "+actionWord(e.Action)+" "+e.Detail), strings.ToLower(q)) {
+			continue
+		}
+		hits = append(hits, e)
+	}
+	pg, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if pg < 1 {
+		pg = 1
+	}
+	from := (pg - 1) * auditPerPage
+	if from > len(hits) {
+		from = len(hits)
+	}
+	to := min(from+auditPerPage, len(hits))
+	link := func(p int) string {
+		v := url.Values{"page": {strconv.Itoa(p)}}
+		if q != "" {
+			v.Set("q", q)
+		}
+		if kind != "" {
+			v.Set("kind", kind)
+		}
+		if failed {
+			v.Set("failed", "1")
+		}
+		return "/audit?" + v.Encode()
+	}
+	d := struct {
+		Entries                  []audit.Entry
+		Chain                    string
+		Q, Kind                  string
+		Failed                   bool
+		Kinds                    []auditKind
+		Total, Matched, From, To int
+		Prev, Next               string
+	}{Entries: hits[from:to], Chain: chain, Q: q, Kind: kind, Failed: failed, Kinds: auditKinds,
+		Total: len(all), Matched: len(hits), From: from + 1, To: to}
+	if pg > 1 {
+		d.Prev = link(pg - 1)
+	}
+	if to < len(hits) {
+		d.Next = link(pg + 1)
+	}
+	s.render(w, r, "audit.html", page{Title: "操作记录", Lead: "谁在什么时候做了什么，包括被拒绝的尝试。", Data: d}, http.StatusOK)
+}
+
+func clusterLead(c *store.Cluster) string {
+	if c.Origin == "" {
+		return "玩家 → 节点 → 源站（还没填源站地址）"
+	}
+	return "玩家 → 节点 → 源站 " + c.Origin
 }

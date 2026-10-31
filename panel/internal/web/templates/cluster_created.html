@@ -1,12 +1,23 @@
 {{template "head" .}}
-<div class="banner warn"><b>现在就把下面的「连接密钥」拷贝存好。</b>它只会在这一页出现一次，之后只能在面板所在的服务器上用 <code>panel get-secret</code> 读。</div>
-<section class="card">
-  <dl>
-    <dt>渠道</dt><dd>{{.Data.Cluster.Name}}</dd>
-    <dt>连接密钥（给这个渠道的每个节点，启动时用 <code>-secret</code> 参数带上）</dt><dd><code class="wrap">{{.Data.NodeSecret}}</code></dd>
-    <dt>公钥（填进 App；公开的，不是秘密）</dt><dd><code class="wrap">{{.Data.PublicKey}}</code></dd>
-  </dl>
-  <p>接下来：加节点、贴 Cloudflare 令牌、更新一次名单。渠道页上有一步一步的清单带你做。</p>
-  <p><a class="btn primary" href="/cluster/{{.Data.Cluster.ID}}">打开这个渠道</a></p>
-</section>
+<div class="row justify-content-center">
+<div class="col-lg-8">
+<div class="alert alert-warning">
+  <h4 class="alert-title">{{icon "key"}} 渠道已创建，先把下面的「节点密钥」存好</h4>
+  <div class="text-secondary">它只在这一页完整显示一次。用「加节点向导」装节点时，面板会自动把它放进安装脚本，你不用手抄；但最好在你自己的密码管理器里留一份备份。以后要读，只能在面板服务器上运行 <code>panel get-secret</code>。</div>
+</div>
+<div class="card">
+  <div class="card-body">
+    <div class="mb-3"><div class="form-label">渠道</div><div class="h3">{{.Data.Cluster.Name}}</div></div>
+    <div class="mb-3"><div class="form-label">节点密钥 <span class="text-secondary fw-normal">（这个渠道所有节点共用，<b>保密</b>）</span></div>
+      <div class="copy-row"><div class="form-control secret-box" id="node-secret">{{.Data.NodeSecret}}</div>
+        <button type="button" class="btn" data-copy="#node-secret">{{icon "copy"}}<span>复制</span></button></div>
+      <div class="form-hint">自己装节点的话：把它存进节点上的一个文件（只有 root 能读），启动时用 <code>-secret-file 文件路径</code> 告诉节点程序。</div></div>
+    <div><div class="form-label">公钥 <span class="text-secondary fw-normal">（填进 App，公开的）</span></div>
+      <div class="copy-row"><div class="form-control secret-box" id="pub">{{.Data.PublicKey}}</div>
+        <button type="button" class="btn" data-copy="#pub">{{icon "copy"}}<span>复制</span></button></div></div>
+  </div>
+  <div class="card-footer text-end"><a class="btn btn-primary" href="/cluster/{{.Data.Cluster.ID}}">我存好了，打开渠道{{icon "arrow-right"}}</a></div>
+</div>
+</div>
+</div>
 {{template "foot" .}}

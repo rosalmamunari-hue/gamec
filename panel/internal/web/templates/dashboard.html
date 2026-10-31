@@ -1,25 +1,45 @@
 {{template "head" .}}
-<p class="lead">一个「渠道」就是一组独立的节点、域名和密钥（比如一个渠道服）。这里能看到每个渠道现在好不好。</p>
-{{if .Admin}}<p><a class="btn primary" href="/cluster/new">＋ 添加渠道</a></p>{{end}}
-{{if not .Data}}<div class="card"><p class="muted">还没有渠道。{{if .Admin}}点上面的「添加渠道」建一个，或在服务器上用 <code>panel import-cluster</code> 把旧的导入进来。{{end}}</p></div>{{end}}
-<div class="grid">
+{{$p := .}}
+{{if .Admin}}<div class="d-flex justify-content-end mb-3"><a class="btn btn-primary" href="/cluster/new">{{icon "plus"}}添加渠道</a></div>{{end}}
+
+{{if not .Data}}
+<div class="card"><div class="empty">
+  <div class="empty-icon">{{icon "shield-lock"}}</div>
+  <p class="empty-title">还没有渠道</p>
+  <p class="empty-subtitle text-secondary">一个「渠道」是一组独立的节点和域名，比如一个渠道服。{{if .Admin}}点下面的按钮建第一个；已有的旧渠道可以在服务器上用 <code>panel import-cluster</code> 导入。{{end}}</p>
+  {{if .Admin}}<div class="empty-action"><a class="btn btn-primary" href="/cluster/new">{{icon "plus"}}添加渠道</a></div>{{end}}
+</div></div>
+{{end}}
+
+<div class="row row-cards">
 {{range .Data}}
-  <section class="card">
-    <div class="section-head">
-      <h2><a href="/cluster/{{.C.ID}}">{{.C.Name}}</a></h2>
-      <span class="pill {{if eq .OK .All}}ok{{else if eq .OK 0}}bad{{else}}warn{{end}}">{{.OK}} / {{.All}} 个节点正常</span>
+  <div class="col-md-6 col-xl-4">
+    <div class="card h-100">
+      <div class="card-status-top bg-{{levelColor .Level}}"></div>
+      <div class="card-body">
+        <div class="d-flex align-items-center mb-2">
+          <h3 class="card-title mb-0 flex-fill"><a href="/cluster/{{.C.ID}}" class="text-reset">{{.C.Name}}</a></h3>
+          <span class="badge bg-{{levelColor .Level}}-lt">{{if eq .Level "ok"}}正常{{else if eq .Level "warn"}}要留意{{else if eq .Level "bad"}}有问题{{else}}未完成设置{{end}}</span>
+        </div>
+        <div class="text-secondary mb-3">{{.Headline}}</div>
+        <div class="row g-2 mb-3 text-center">
+          <div class="col-4"><div class="h3 mb-0">{{.OK}}<span class="text-secondary fs-5">/{{.All}}</span></div><div class="text-secondary small">节点正常</div></div>
+          <div class="col-4"><div class="h3 mb-0">{{if .C.Last.Exp}}{{daysLeft .C.Last.Exp}}{{else}}—{{end}}</div><div class="text-secondary small">名单{{if .C.Last.Exp}}剩余天数{{else}}未发布{{end}}</div></div>
+          <div class="col-4"><div class="h3 mb-0">{{if .C.AutoPublish}}<span class="text-success">开</span>{{else}}<span class="text-secondary">关</span>{{end}}</div><div class="text-secondary small">自动维护</div></div>
+        </div>
+        {{range .Problems}}<div class="d-flex gap-2 small mb-1 {{if .Bad}}text-danger{{else}}text-warning{{end}}">{{icon "alert-triangle"}}<span>{{.Text}}</span></div>{{end}}
+        {{if .Nodes}}
+        <div class="mt-3">
+        {{range .Nodes}}<div class="d-flex align-items-center small py-1 border-top">{{template "status" .}}<span class="ms-2 flex-fill">{{.N.Name}}</span><span class="text-secondary">{{.Latency}}</span></div>{{end}}
+        </div>
+        {{end}}
+      </div>
+      <div class="card-footer">
+        {{if .Next}}<a href="{{.Next.Href}}" class="btn btn-primary w-100">下一步：{{.Next.Title}}{{icon "arrow-right"}}</a>
+        {{else}}<a href="/cluster/{{.C.ID}}" class="btn w-100">打开渠道{{icon "chevron-right"}}</a>{{end}}
+      </div>
     </div>
-    {{range .Alerts}}<div class="alert">&#9888; {{.}}</div>{{end}}
-    <p class="muted small">名单有效期：{{.Expiry}} · 自动更新：{{if .C.AutoPublish}}开{{else}}关{{end}}</p>
-    <ul class="nodes">
-    {{range .Nodes}}
-      <li class="node {{.Status}}"><span class="dot"></span><b>{{.N.Name}}</b> <code>{{.N.Host}}:{{.N.Port}}</code>
-        <span class="muted small">{{.Detail}}{{if .Latency}} · {{.Latency}}{{end}}</span></li>
-    {{end}}
-    </ul>
-    {{if .Next}}<div class="next-line">下一步：<b>{{.Next.Title}}</b> <a href="{{.Next.Href}}">{{.Next.Link}} →</a></div>
-    {{else}}<div class="next-line done">&#10003; 一切就绪，面板会自动维护。</div>{{end}}
-  </section>
+  </div>
 {{end}}
 </div>
 {{template "foot" .}}

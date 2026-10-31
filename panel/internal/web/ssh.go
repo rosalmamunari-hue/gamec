@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gamec/panel/internal/auth"
@@ -43,6 +44,7 @@ type nodePageData struct {
 	Fingerprint string // freshly fetched, waiting for the administrator to confirm
 	KeyType     string
 	KeyChanged  bool
+	Latest      string // newest release, suggested for upgrades
 }
 
 func (s *Server) lookup(r *http.Request) (*store.Cluster, *store.Node, bool) {
@@ -64,7 +66,8 @@ func (s *Server) renderNode(w http.ResponseWriter, r *http.Request, d nodePageDa
 			d.View = v
 		}
 	}
-	s.render(w, r, "node.html", page{Title: d.Node.Name, Flash: flash, Error: errMsg, Data: d}, status)
+	d.Latest = s.latestRelease()
+	s.render(w, r, "node.html", page{Title: d.Node.Name, Back: &backLink{"/cluster/" + d.Cluster.ID, "返回 " + d.Cluster.Name}, Flash: flash, Error: errMsg, Data: d}, status)
 }
 
 func (s *Server) nodePage(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
@@ -313,6 +316,7 @@ type sshPageData struct {
 	HasKey     bool
 	PublicLine string
 	Script     string
+	Latest     string
 }
 
 func (s *Server) panelKey() (pub string, has bool, err error) {
@@ -336,14 +340,14 @@ func (s *Server) sshPage(w http.ResponseWriter, r *http.Request, _ *auth.Session
 	if err != nil {
 		msg = err.Error()
 	}
-	s.render(w, r, "ssh.html", page{Title: "SSH 管理", Error: msg, Data: sshPageData{HasKey: has, PublicLine: pub}}, http.StatusOK)
+	s.render(w, r, "ssh.html", page{Title: "服务器管理", Lead: "让面板远程管理节点：看状态和日志、启停、升级、出问题自动退回。", Error: msg, Data: sshPageData{HasKey: has, PublicLine: pub, Latest: s.latestRelease()}}, http.StatusOK)
 }
 
 func (s *Server) sshScript(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
 	pub, has, err := s.panelKey()
-	data := sshPageData{HasKey: has, PublicLine: pub}
+	data := sshPageData{HasKey: has, PublicLine: pub, Latest: s.latestRelease()}
 	fail := func(msg string) {
-		s.render(w, r, "ssh.html", page{Title: "SSH 管理", Error: msg, Data: data}, http.StatusBadRequest)
+		s.render(w, r, "ssh.html", page{Title: "服务器管理", Lead: "让面板远程管理节点：看状态和日志、启停、升级、出问题自动退回。", Error: msg, Data: data}, http.StatusBadRequest)
 	}
 	if err != nil || !has {
 		fail("面板还没有 SSH 密钥。请在服务器上用 `panel ssh-keygen` 创建。")
@@ -365,7 +369,36 @@ func (s *Server) sshScript(w http.ResponseWriter, r *http.Request, _ *auth.Sessi
 	}
 	data.Script = script
 	s.log(r, "ssh-script", "release="+safe(tag), true)
-	s.render(w, r, "ssh.html", page{Title: "SSH 管理", Data: data}, http.StatusOK)
+	s.render(w, r, "ssh.html", page{Title: "服务器管理", Lead: "让面板远程管理节点：看状态和日志、启停、升级、出问题自动退回。", Data: data}, http.StatusOK)
 }
 
 var _ = engine.ProbeResult{}
+
+// latestRelease is the newest published version, to fill in as a suggestion. It never waits for the
+// network: the answer is refreshed in the background at most once an hour, and is empty until then.
+func (s *Server) latestRelease() string {
+	s.latest.mu.Lock()
+	defer s.latest.mu.Unlock()
+	if s.ReleaseBase != "" && !s.latest.busy && time.Since(s.latest.at) > time.Hour {
+		s.latest.busy = true
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			tag, err := s.releases().Latest(ctx)
+			s.latest.mu.Lock()
+			defer s.latest.mu.Unlock()
+			s.latest.busy, s.latest.at = false, time.Now()
+			if err == nil {
+				s.latest.tag = tag
+			}
+		}()
+	}
+	return s.latest.tag
+}
+
+type latestCache struct {
+	mu   sync.Mutex
+	tag  string
+	at   time.Time
+	busy bool
+}

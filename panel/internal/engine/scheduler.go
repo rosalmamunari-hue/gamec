@@ -77,7 +77,7 @@ func (s *Scheduler) Tick(ctx context.Context) {
 	st := s.Store.Snapshot()
 	for _, c := range st.Clusters {
 		if !c.AutoPublish {
-			s.setNote(c.ID, "automatic publishing is off for this cluster")
+			s.setNote(c.ID, "这个渠道的自动维护是关着的")
 			continue
 		}
 		active := st.Active(c.ID, now)
@@ -119,7 +119,7 @@ func (s *Scheduler) Tick(ctx context.Context) {
 				}
 			}
 			rs.next = now.Add(rs.delay)
-			s.notes[c.ID] = fmt.Sprintf("automatic publish failed (%s); next try in %s", err, rs.delay)
+			s.notes[c.ID] = fmt.Sprintf("自动更新名单失败（%s），%s后重试", err, humanDelay(rs.delay))
 		} else {
 			delete(s.retry, c.ID)
 			s.notes[c.ID] = dec.Note
@@ -140,4 +140,11 @@ func (s *Scheduler) Run(ctx context.Context, every time.Duration) {
 		case <-t.C:
 		}
 	}
+}
+
+func humanDelay(d time.Duration) string {
+	if d >= time.Hour {
+		return fmt.Sprintf("%d 小时", int(d.Hours()))
+	}
+	return fmt.Sprintf("%d 分钟", int(d.Minutes()))
 }

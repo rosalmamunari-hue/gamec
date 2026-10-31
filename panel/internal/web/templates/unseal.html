@@ -1,14 +1,23 @@
 {{template "head" .}}
-<form method="post" action="/unseal" class="card narrow">
+<div class="row justify-content-center">
+<div class="col-md-8 col-lg-6">
+<form method="post" action="/unseal" class="card">
+  <div class="card-body">
   {{if .Sealed}}
-  <p class="muted">保险库是面板里的加密保险箱，放着签名密钥和域名帐号的授权。口令只有你知道，面板不会存它，所以<b>每次面板重新启动后都要解锁一次</b>。</p>
-  <input type="hidden" name="csrf" value="{{.CSRF}}">
-  <label>保险库口令 <input name="passphrase" type="password" autocomplete="off" required autofocus></label>
-  <button class="primary">解锁</button>
+    <div class="text-center mb-3"><span class="avatar avatar-lg bg-danger-lt">{{icon "lock"}}</span></div>
+    <p class="text-secondary">保险库是面板里加了密的保险箱，放着签名密钥和域名授权。口令只有你知道，面板不保存它，所以<b>面板每次重启后都要解锁一次</b>。</p>
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <div class="mb-3"><label class="form-label" for="u-pw">保险库口令</label><input class="form-control" id="u-pw" name="passphrase" type="password" autocomplete="off" required autofocus></div>
+    <button class="btn btn-primary w-100">{{icon "lock-open"}}解锁</button>
   {{else}}
-  <p>保险库已经解锁，不用再做什么。</p>
-  <input type="hidden" name="csrf" value="{{.CSRF}}">
-  <p><a class="btn" href="/">回到渠道</a></p>
+    <div class="text-center">
+      <span class="avatar avatar-lg bg-success-lt mb-3">{{icon "lock-open"}}</span>
+      <p>保险库已经解锁，不用再做什么。</p>
+      <a class="btn" href="/">回到总览</a>
+    </div>
   {{end}}
+  </div>
 </form>
+</div>
+</div>
 {{template "foot" .}}

@@ -607,7 +607,7 @@ func TestSchedulerBacksOffAfterAFailure(t *testing.T) {
 	if p.count() != before+2 {
 		t.Fatal("the delay did not double")
 	}
-	if !strings.Contains(e.sch.Note(c.ID), "next try") {
+	if !strings.Contains(e.sch.Note(c.ID), "后重试") {
 		t.Fatalf("operators should be told: %q", e.sch.Note(c.ID))
 	}
 	p.fail = nil

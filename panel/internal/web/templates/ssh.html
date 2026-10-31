@@ -1,28 +1,53 @@
 {{template "head" .}}
-<p class="lead">让面板可以远程帮你管节点：看状态和日志、启动／停止／重启、升级程序、出问题一键退回。全程不需要 root 密码。</p>
-<section class="card">
-  <p class="muted small">做法：面板有自己的一把密钥，在每台节点服务器上建一个权限很小的帐号，这个帐号只能运行一个叫 <code>gamec-nodectl</code> 的小工具，做不了别的事。</p>
-  {{if .Data.HasKey}}
-    <h2>面板的公钥</h2>
-    <p class="muted small">下面准备脚本里已经包含它，不用自己贴。</p>
-    <p><code class="wrap">{{.Data.PublicLine}}</code></p>
-  {{else}}
-    <p class="alert">面板还没有自己的密钥。请在面板所在服务器上运行一次 <code>panel ssh-keygen</code>。</p>
-  {{end}}
-</section>
-
-{{if .Data.HasKey}}
-<section class="card">
-  <h2>第一步：准备节点服务器</h2>
-  <p>点下面按钮会生成一段脚本。<b>请先看一遍，再到每台节点服务器上用 root 运行一次</b>。它会：创建受限帐号、只允许面板的密钥登录、装好 <code>gamec-nodectl</code>（会用校验码检查没被改过）、加一条只允许运行它的权限规则。</p>
-  <form method="post" action="/ssh" class="stack">
-    <input type="hidden" name="csrf" value="{{.CSRF}}">
-    <label>用哪个版本的工具 <span class="hint">填发布版本号，比如 <code>v0.2.0</code>。</span><input name="tag" placeholder="v0.2.0" required></label>
-    <label>只允许从这个地址登录（建议填） <span class="hint">填面板自己的 IP，这样别的地方即使拿到密钥也登不进去。</span><input name="from" placeholder="203.0.113.9"></label>
-    <button class="primary">生成脚本</button>
-  </form>
-  {{if .Data.Script}}<h3>脚本</h3><pre>{{.Data.Script}}</pre>
-  <p class="muted small">跑完后，到渠道页的节点「管理」里填帐号，再确认服务器指纹即可。</p>{{end}}
-</section>
+<div class="row row-cards">
+<div class="col-lg-8">
+{{if not .Data.HasKey}}
+<div class="alert alert-warning">
+  <h4 class="alert-title">面板还没有自己的密钥</h4>
+  <div>先停掉面板，在面板服务器上运行一次 <code>panel ssh-keygen</code>，再启动面板。</div>
+</div>
+{{else}}
+<div class="card mb-3">
+  <div class="card-header"><div><h3 class="card-title">给已经装好的节点开远程管理</h3>
+    <div class="card-subtitle">新节点请直接用渠道页的「加节点」向导，它一步就装好节点和远程管理。这里是给以前手动装的节点补上的。</div></div></div>
+  <div class="card-body">
+    <p>点下面的按钮会生成一段脚本。<b>先看一遍，再到节点服务器上用 root 运行一次</b>。它会建一个权限很小的账号、只允许面板的密钥登录、装好 <code>gamec-nodectl</code>（会核对校验码），并且只允许这个账号运行它。全程不需要 root 密码。</p>
+    <form method="post" action="/ssh">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <div class="row">
+        <div class="col-md-6 mb-3"><label class="form-label" for="p-tag">工具版本</label><input class="form-control" id="p-tag" name="tag" placeholder="v0.4.0" value="{{.Data.Latest}}" required></div>
+        <div class="col-md-6 mb-3"><label class="form-label" for="p-from">只允许从这个地址登录 <span class="text-secondary fw-normal">（建议填）</span></label><input class="form-control mono" id="p-from" name="from" placeholder="面板服务器的 IP">
+          <div class="form-hint">这样即使密钥泄露，别的地方也登不进去。用了出口中转的话填中转机的 IP。</div></div>
+      </div>
+      <button class="btn btn-primary" data-busy="生成中…">{{icon "terminal-2"}}生成脚本</button>
+    </form>
+    {{if .Data.Script}}
+    <hr>
+    <div class="d-flex align-items-center mb-2"><h4 class="mb-0 flex-fill">脚本</h4><button type="button" class="btn btn-sm" data-copy="#prep-script">{{icon "copy"}}<span>复制</span></button></div>
+    <pre class="script" id="prep-script">{{.Data.Script}}</pre>
+    <div class="text-secondary">跑完后，打开那个节点的「管理」页，账号填 <code>gamec-ops</code>，再确认服务器指纹就可以了。</div>
+    {{end}}
+  </div>
+</div>
 {{end}}
+</div>
+<div class="col-lg-4">
+<div class="card">
+  <div class="card-header"><h3 class="card-title">远程管理能做什么</h3></div>
+  <div class="card-body">
+    <ul class="mb-3">
+      <li>看节点程序的状态和日志</li>
+      <li>启动、停止、重启，或者「停几分钟自己起来」</li>
+      <li>升级到新版本，没通过检查自动退回</li>
+    </ul>
+    <p class="text-secondary small">面板只能运行节点上的 <code>gamec-nodectl</code> 这一个程序，做不了别的事；而且只认你确认过的服务器指纹。</p>
+    {{if .Data.HasKey}}
+    <div class="form-label">面板的公钥</div>
+    <div class="form-control secret-box small">{{.Data.PublicLine}}</div>
+    <div class="form-hint">脚本里已经带上了，不用自己贴。</div>
+    {{end}}
+  </div>
+</div>
+</div>
+</div>
 {{template "foot" .}}
