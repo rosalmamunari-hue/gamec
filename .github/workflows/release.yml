@@ -37,7 +37,7 @@ jobs:
           mkdir -p ../dist
           for target in linux/amd64 windows/amd64; do
             os=${target%/*}; arch=${target#*/}; ext=""; [ "$os" = windows ] && ext=".exe"
-            for tool in . ./cmd/gencert ./cmd/signlist ./cmd/probe ./cmd/soak ./cmd/nodectl; do
+            for tool in . ./cmd/gencert ./cmd/signlist ./cmd/probe ./cmd/soak ./cmd/nodectl ./cmd/realip; do
               name=$([ "$tool" = . ] && echo edge || basename "$tool")
               GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -ldflags="-s -w" -o "../dist/${name}-${os}-${arch}${ext}" "$tool"
             done

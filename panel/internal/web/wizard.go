@@ -164,7 +164,7 @@ func (s *Server) wizardScript(w http.ResponseWriter, r *http.Request, _ *auth.Se
 	}
 	base := strings.TrimRight(s.releases().Base, "/") + "/" + f.Tag + "/"
 	prog := func(name string) ops.Program { return ops.Program{URL: base + name, SHA256: sums[name]} }
-	script, err := ops.InstallScript(ops.InstallParams{Unit: "gamec-edge", Host: f.Host, Port: f.Port, Origin: f.Origin, Secret: secret,
+	script, err := ops.InstallScript(ops.InstallParams{Unit: "gamec-edge", Host: f.Host, Port: f.Port, Origin: f.Origin, ProxyV2: c.ProxyV2, Secret: secret,
 		Edge: prog("edge-linux-amd64"), Gencert: prog("gencert-linux-amd64"), Nodectl: prog("nodectl-linux-amd64"), PubLine: pub, From: f.From})
 	if err != nil {
 		s.renderWizard(w, r, d, "生成脚本失败："+err.Error(), http.StatusBadRequest)

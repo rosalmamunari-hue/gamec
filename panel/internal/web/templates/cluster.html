@@ -265,6 +265,9 @@
         <div class="mb-3"><label class="form-label" for="c-origin">源站地址</label>
           <input class="form-control mono" id="c-origin" name="origin" value="{{$c.Origin}}" placeholder="203.0.113.5:10443">
           <div class="form-hint">节点最后把玩家的流量转到这里（游戏服务器的 IP:端口）。加节点向导会用它。</div></div>
+        <div class="mb-3"><label class="form-check"><input class="form-check-input" type="checkbox" name="proxy_v2"{{if $c.ProxyV2}} checked{{end}}>
+          <span class="form-check-label">告诉源站玩家的真实 IP（PROXY v2 头）</span></label>
+          <div class="form-hint">节点连源站时先发一个 PROXY v2 头，写上玩家的 IP。<b>源站必须认这个头，否则所有连接都会断。</b>源站前面还有高防、而高防也加了自己的头的话，要在源站上先装好 realip。加节点向导装的新节点会带上这个参数；已有的节点要手动在启动参数里加 <span class="mono">-proxy-v2</span>，然后重启（节点程序要 v0.5.1 以上）。</div></div>
         <div class="row">
           <div class="col-6 mb-3"><label class="form-label" for="c-valid">名单有效几天</label><input class="form-control" id="c-valid" name="valid_days" type="number" min="2" max="90" value="{{$c.ValidDays}}" required></div>
           <div class="col-6 mb-3"><label class="form-label" for="c-renew">到期前几天续期</label><input class="form-control" id="c-renew" name="renew_days" type="number" min="1" max="89" value="{{$c.RenewBeforeDays}}" required></div>
@@ -274,6 +277,7 @@
       {{else}}
       <dl class="row mb-0">
         <dt class="col-5 text-secondary fw-normal">源站</dt><dd class="col-7 mono">{{if $c.Origin}}{{$c.Origin}}{{else}}—{{end}}</dd>
+        <dt class="col-5 text-secondary fw-normal">玩家真实 IP</dt><dd class="col-7">{{if $c.ProxyV2}}用 PROXY v2 头告诉源站{{else}}不告诉源站{{end}}</dd>
         <dt class="col-5 text-secondary fw-normal">名单有效期</dt><dd class="col-7">{{$c.ValidDays}} 天，到期前 {{$c.RenewBeforeDays}} 天续期</dd>
       </dl>
       {{end}}

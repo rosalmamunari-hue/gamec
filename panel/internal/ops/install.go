@@ -29,6 +29,7 @@ type InstallParams struct {
 	Host    string // the node's public IP or name, for its certificate
 	Port    int    // where players connect
 	Origin  string // host:port of the game server the node forwards to
+	ProxyV2 bool   // tell the origin each player's address in a PROXY v2 header
 	Secret  string // the cluster's token secret (64 hex characters)
 	Edge    Program
 	Gencert Program
@@ -81,8 +82,12 @@ func InstallScript(p InstallParams) (string, error) {
 		return "", err
 	}
 	dir := "/opt/" + p.Unit
+	proxy := ""
+	if p.ProxyV2 {
+		proxy = " -proxy-v2"
+	}
 	r := strings.NewReplacer("@UNIT@", p.Unit, "@DIR@", dir, "@HOST@", p.Host, "@PORT@", strconv.Itoa(p.Port),
-		"@ORIGIN@", p.Origin, "@SECRET@", p.Secret,
+		"@ORIGIN@", p.Origin, "@PROXY@", proxy, "@SECRET@", p.Secret,
 		"@EDGE_URL@", p.Edge.URL, "@EDGE_SHA@", p.Edge.SHA256, "@GENCERT_URL@", p.Gencert.URL, "@GENCERT_SHA@", p.Gencert.SHA256)
 	return r.Replace(installHead) + manage + r.Replace(installTail), nil
 }
@@ -134,7 +139,7 @@ Wants=network-online.target
 [Service]
 User=gamec-edge
 Group=gamec-edge
-ExecStart=@DIR@/edge -listen :@PORT@ -origin @ORIGIN@ -cert @DIR@/tls/cert.pem -key @DIR@/tls/key.pem -secret-file @DIR@/secret
+ExecStart=@DIR@/edge -listen :@PORT@ -origin @ORIGIN@@PROXY@ -cert @DIR@/tls/cert.pem -key @DIR@/tls/key.pem -secret-file @DIR@/secret
 Restart=always
 RestartSec=2
 LimitNOFILE=65536

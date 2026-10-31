@@ -63,6 +63,7 @@ type Cluster struct {
 	ID              string      `json:"id"`
 	Name            string      `json:"name"`
 	Origin          string      `json:"origin"` // where its nodes forward to; informational
+	ProxyV2         bool        `json:"proxy_v2,omitempty"` // nodes start each origin connection with a PROXY v2 header naming the player
 	Targets         []DNSTarget `json:"targets"`
 	ValidDays       int         `json:"valid_days"`        // how long each signed list is valid
 	RenewBeforeDays int         `json:"renew_before_days"` // re-sign this long before it expires

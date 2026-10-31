@@ -39,6 +39,7 @@ func (s *Server) clusterEdit(w http.ResponseWriter, r *http.Request, _ *auth.Ses
 	origin := strings.TrimSpace(r.FormValue("origin"))
 	valid, err1 := strconv.Atoi(r.FormValue("valid_days"))
 	renew, err2 := strconv.Atoi(r.FormValue("renew_days"))
+	proxyV2 := r.FormValue("proxy_v2") == "on"
 	fail := func(msg string) { s.renderCluster(w, r, id, "", msg, http.StatusBadRequest) }
 	switch {
 	case !clusterNameRe.MatchString(name):
@@ -64,14 +65,14 @@ func (s *Server) clusterEdit(w http.ResponseWriter, r *http.Request, _ *auth.Ses
 			}
 		}
 		originChanged = c.Origin != origin
-		c.Name, c.Origin, c.ValidDays, c.RenewBeforeDays = name, origin, valid, renew
+		c.Name, c.Origin, c.ValidDays, c.RenewBeforeDays, c.ProxyV2 = name, origin, valid, renew, proxyV2
 		return nil
 	})
 	if err != nil {
 		fail(friendlyStoreError(err))
 		return
 	}
-	s.log(r, "cluster-edit", fmt.Sprintf("cluster=%s name=%s origin=%s valid=%d renew=%d", id, safe(name), safe(origin), valid, renew), true)
+	s.log(r, "cluster-edit", fmt.Sprintf("cluster=%s name=%s origin=%s proxy_v2=%v valid=%d renew=%d", id, safe(name), safe(origin), proxyV2, valid, renew), true)
 	if originChanged && origin != "" {
 		if c := s.Store.Snapshot().Cluster(id); c != nil {
 			go s.checkOrigin(context.Background(), c)

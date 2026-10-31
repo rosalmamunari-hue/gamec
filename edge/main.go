@@ -43,6 +43,7 @@ var (
 	maxConns   = flag.Int("max-conns", 10000, "max concurrent connections in total")
 	idle       = flag.Duration("idle-timeout", 10*time.Minute, "close a relay after this long with no data either way; 0 = never")
 	tokenTTL   = flag.Duration("token-ttl", 5*time.Minute, "token validity window")
+	proxyV2    = flag.Bool("proxy-v2", false, "start every origin connection with a PROXY protocol v2 header naming the player's address (the origin must expect it)")
 )
 
 const minSecretLen = 16
@@ -189,6 +190,16 @@ func handle(c net.Conn, lim *limiter) {
 		return
 	}
 	defer up.Close()
+	if *proxyV2 {
+		up.SetWriteDeadline(time.Now().Add(3 * time.Second))
+		_, err := up.Write(shieldclient.AppendProxyV2(nil, shieldclient.AddrPortOf(c.RemoteAddr()), shieldclient.AddrPortOf(c.LocalAddr())))
+		up.SetWriteDeadline(time.Time{})
+		if err != nil {
+			stats.refuse("origin")
+			log.Printf("origin: PROXY header: %v", err)
+			return
+		}
+	}
 	defer stats.relayOpened(ip, device)()
 	relay(countingConn{c, &stats.bytesUp}, countingConn{up, &stats.bytesDown}, *idle)
 }

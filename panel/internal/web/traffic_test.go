@@ -131,3 +131,24 @@ func TestSparkAndRates(t *testing.T) {
 		t.Fatal(humanBytes(1536), humanRate(6<<20, time.Minute))
 	}
 }
+
+func TestTheClusterCanTellTheOriginThePlayer(t *testing.T) {
+	e := newEnv(t, false)
+	c := e.admin()
+	cl := e.seedCluster("official")
+	form := url.Values{"csrf": {c.csrf()}, "name": {"official"}, "origin": {"203.0.113.5:10443"}, "valid_days": {"14"}, "renew_days": {"3"}, "proxy_v2": {"on"}}
+	if st, _, _ := c.post("/cluster/"+cl.ID+"/edit", form, nil); st != http.StatusSeeOther {
+		t.Fatal(st)
+	}
+	if !e.st.Snapshot().Cluster(cl.ID).ProxyV2 {
+		t.Fatal("not saved")
+	}
+	if _, body, _ := c.get("/cluster/" + cl.ID); !strings.Contains(body, `name="proxy_v2" checked`) {
+		t.Fatal("the box is not shown ticked")
+	}
+	form.Del("proxy_v2")
+	c.post("/cluster/"+cl.ID+"/edit", form, nil)
+	if e.st.Snapshot().Cluster(cl.ID).ProxyV2 {
+		t.Fatal("could not be turned off")
+	}
+}
