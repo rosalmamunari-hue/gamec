@@ -9,10 +9,6 @@ workflows:
       branch_patterns:
         - pattern: main
           include: true
-        - pattern: fix/review-round2
-          include: true
-        - pattern: feat/compact-list
-          include: true
     scripts:
       - name: Swift version
         script: swift --version
