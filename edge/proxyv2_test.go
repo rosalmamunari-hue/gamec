@@ -58,3 +58,37 @@ func TestProxyV2NamesThePlayerToTheOrigin(t *testing.T) {
 		t.Fatalf("dst %s, want the node's %s", h.Dst, addr)
 	}
 }
+
+func TestProxyV1NamesThePlayerToTheOrigin(t *testing.T) {
+	addr := startEdge(t)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	line := make(chan string, 1)
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		r := bufio.NewReader(c)
+		s, _ := r.ReadString('\n')
+		line <- s
+		r.WriteTo(c)
+	}()
+	*origin = ln.Addr().String()
+	*proxyV1 = true
+	defer func() { *proxyV1 = false }()
+	c := dial(t, addr, MakeToken("test-secret", "dev", time.Now()))
+	defer c.Close()
+	if !echoWorks(c) {
+		t.Fatal("the relay should work after the header")
+	}
+	_, port, _ := net.SplitHostPort(c.LocalAddr().String())
+	_, eport, _ := net.SplitHostPort(addr)
+	if want := "PROXY TCP4 127.0.0.1 127.0.0.1 " + port + " " + eport + "\r\n"; <-line != want {
+		t.Fatal("origin did not get", want)
+	}
+}

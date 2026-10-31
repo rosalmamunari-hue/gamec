@@ -50,3 +50,13 @@ func TestProxyV2SkipsTLVsAndRefusesJunk(t *testing.T) {
 		t.Fatal("junk read as a header")
 	}
 }
+
+func TestProxyV1(t *testing.T) {
+	src, dst := netip.MustParseAddrPort("198.51.100.7:51000"), netip.MustParseAddrPort("203.0.113.1:30800")
+	if got := string(AppendProxyV1(nil, src, dst)); got != "PROXY TCP4 198.51.100.7 203.0.113.1 51000 30800\r\n" {
+		t.Fatalf("%q", got)
+	}
+	if got := string(AppendProxyV1(nil, netip.MustParseAddrPort("[2001:db8::7]:1"), dst)); got != "PROXY TCP6 2001:db8::7 ::ffff:203.0.113.1 1 30800\r\n" {
+		t.Fatalf("%q", got)
+	}
+}

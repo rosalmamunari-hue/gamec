@@ -44,6 +44,18 @@ func AppendProxyV2(b []byte, src, dst netip.AddrPort) []byte {
 	return binary.BigEndian.AppendUint16(b, dst.Port())
 }
 
+// AppendProxyV1 appends a PROXY v1 (text) header for a TCP connection from src to dst, like
+// "PROXY TCP4 198.51.100.7 203.0.113.1 51000 30800\r\n". Two addresses of different families are written as IPv6.
+func AppendProxyV1(b []byte, src, dst netip.AddrPort) []byte {
+	s, d := src.Addr().Unmap(), dst.Addr().Unmap()
+	fam := "TCP4"
+	if !s.Is4() || !d.Is4() {
+		fam = "TCP6"
+		s, d = netip.AddrFrom16(s.As16()), netip.AddrFrom16(d.As16())
+	}
+	return fmt.Appendf(b, "PROXY %s %s %s %d %d\r\n", fam, s, d, src.Port(), dst.Port())
+}
+
 // AppendProxyV2Local appends a LOCAL header: the connection is the sender's own, there is no client to name.
 func AppendProxyV2Local(b []byte) []byte {
 	return append(append(b, ProxySig...), 0x20, 0x00, 0, 0)

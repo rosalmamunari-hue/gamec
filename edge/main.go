@@ -44,6 +44,7 @@ var (
 	idle       = flag.Duration("idle-timeout", 10*time.Minute, "close a relay after this long with no data either way; 0 = never")
 	tokenTTL   = flag.Duration("token-ttl", 5*time.Minute, "token validity window")
 	proxyV2    = flag.Bool("proxy-v2", false, "start every origin connection with a PROXY protocol v2 header naming the player's address (the origin must expect it)")
+	proxyV1    = flag.Bool("proxy-v1", false, "the same with a PROXY protocol v1 (text) header")
 )
 
 const minSecretLen = 16
@@ -190,9 +191,14 @@ func handle(c net.Conn, lim *limiter) {
 		return
 	}
 	defer up.Close()
-	if *proxyV2 {
+	if *proxyV1 || *proxyV2 {
+		src, dst := shieldclient.AddrPortOf(c.RemoteAddr()), shieldclient.AddrPortOf(c.LocalAddr())
+		head := shieldclient.AppendProxyV2(nil, src, dst)
+		if *proxyV1 {
+			head = shieldclient.AppendProxyV1(nil, src, dst)
+		}
 		up.SetWriteDeadline(time.Now().Add(3 * time.Second))
-		_, err := up.Write(shieldclient.AppendProxyV2(nil, shieldclient.AddrPortOf(c.RemoteAddr()), shieldclient.AddrPortOf(c.LocalAddr())))
+		_, err := up.Write(head)
 		up.SetWriteDeadline(time.Time{})
 		if err != nil {
 			stats.refuse("origin")
