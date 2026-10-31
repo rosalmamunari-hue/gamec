@@ -86,6 +86,7 @@ func (s *Scheduler) Tick(ctx context.Context) {
 			s.setNote(c.ID, dec.Note)
 			continue
 		}
+		dec.Nodes = Fit(c, dec.Nodes)
 		wantKey := store.NodesKey(dec.Nodes)
 		var why string
 		switch {

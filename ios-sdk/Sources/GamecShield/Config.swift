@@ -7,7 +7,8 @@ public enum ShieldError: Error {
     case badResponse
 }
 
-/// An edge node. `pinSha256` is base64(SHA-256(SubjectPublicKeyInfo)) as printed by `gencert`.
+/// An edge node. `pinSha256` is base64(SHA-256(SubjectPublicKeyInfo)) as printed by `gencert`, or of its first
+/// 16 bytes (as the compact list carries it).
 public struct Node: Hashable {
     public let host: String
     public let port: UInt16

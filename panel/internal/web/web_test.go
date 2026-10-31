@@ -42,7 +42,10 @@ type recProv struct {
 }
 
 func (r *recProv) Name() string { return "rec" }
-func (r *recProv) ReplaceTXT(context.Context, string, string, []string) error {
+func (r *recProv) ReplaceTXT(_ context.Context, _, fqdn string, _ []string) error {
+	if strings.HasPrefix(fqdn, "dw2.") { // the next names, written after each list
+		return nil
+	}
 	r.mu.Lock()
 	r.calls++
 	r.mu.Unlock()

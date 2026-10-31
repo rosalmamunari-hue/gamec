@@ -126,6 +126,16 @@ internal object Resolvers {
             accepts(cfg, it, minIat, System.currentTimeMillis() / 1000)
         }
 
+    /** Like [query], for the next names at a dw2. name. */
+    fun queryNext(cfg: DiscoveryConfig, name: String, minIat: Long = 0): List<String> =
+        race(build(cfg), name, cfg.timeoutMs, cfg.resolverStaggerMs) {
+            try {
+                NextVerifier.parse(it, cfg.publicKey, System.currentTimeMillis() / 1000, cfg.listKey).iat >= minIat
+            } catch (_: Exception) {
+                false
+            }
+        }
+
     internal fun accepts(cfg: DiscoveryConfig, recs: List<String>, minIat: Long, nowSec: Long): Boolean =
         try {
             ListVerifier.parse(recs, cfg.publicKey, nowSec, cfg.listKey).iat >= minIat

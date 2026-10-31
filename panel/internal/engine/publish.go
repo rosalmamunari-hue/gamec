@@ -31,6 +31,11 @@ type Verifier interface {
 	Verify(ctx context.Context, fqdn string, pub *ecdsa.PublicKey, wantIat int64) error
 }
 
+// NextVerifier is a Verifier that can also read back the next names at dw2.<name>.
+type NextVerifier interface {
+	VerifyNext(ctx context.Context, fqdn string, pub *ecdsa.PublicKey, wantIat int64, sealKey []byte) error
+}
+
 // SealedVerifier is a Verifier that can also read back a sealed list.
 type SealedVerifier interface {
 	VerifySealed(ctx context.Context, fqdn string, pub *ecdsa.PublicKey, wantIat int64, sealKey []byte) error
@@ -138,13 +143,14 @@ func (p *Publisher) Publish(ctx context.Context, clusterID string, nodes []*stor
 		return fail(fmt.Errorf("signing key: %w", err))
 	}
 
+	nodes = Fit(c, nodes)
 	list := make([]shieldlist.Node, len(nodes))
 	for i, n := range nodes {
 		list[i] = shieldlist.Node{H: n.Host, P: n.Port, K: n.Pin}
 	}
 	now := p.now()
 	valid := time.Duration(c.ValidDays) * 24 * time.Hour
-	opts := shieldlist.Options{Next: targetNames(c.Targets)}
+	opts := shieldlist.Options{}
 	if c.Sealed {
 		rawSeal, ok, err := p.Vault.Get(SealKeyName(clusterID))
 		if err != nil {
@@ -157,13 +163,20 @@ func (p *Publisher) Publish(ctx context.Context, clusterID string, nodes []*stor
 			return fail(fmt.Errorf("seal key: %w", err))
 		}
 	}
-	recs, err := shieldlist.BuildRecordsOpts(key, list, now, valid, opts)
+	rec, err := shieldlist.BuildCompact(key, list, now, valid, opts.SealKey)
 	if err != nil {
 		return fail(err)
 	}
+	recs := []string{rec}
 	if _, err := shieldlist.VerifyRecordsSealed(recs, &key.PublicKey, now, opts.SealKey); err != nil {
 		return fail(fmt.Errorf("self-check of the signed list failed: %w", err))
 	}
+	// The names to read from next time go in a record of their own, at dw2.<name>, so the list stays small.
+	nextRec, err := shieldlist.BuildNextRecord(key, targetNames(c.Targets), now, valid, opts.SealKey)
+	if err != nil {
+		return fail(err)
+	}
+	nextRecs := []string{nextRec}
 	res.Nodes, res.Records, res.Iat, res.Exp = nodeLabels(nodes), recs, now.Unix(), now.Add(valid).Unix()
 
 	// Writing is not tied to the caller: a browser that goes away (or the request timeout) must not stop a
@@ -179,6 +192,9 @@ func (p *Publisher) Publish(ctx context.Context, clusterID string, nodes []*stor
 		} else {
 			wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), WriteTimeout)
 			err := prov.ReplaceTXT(wctx, t.Zone, t.Name, recs)
+			if err == nil { // the list first: the names to read next time only matter once it is there
+				err = prov.ReplaceTXT(wctx, t.Zone, shieldlist.NextName(t.Name), nextRecs)
+			}
 			cancel()
 			switch {
 			case errors.Is(err, dns.ErrManual):
@@ -205,6 +221,11 @@ func (p *Publisher) Publish(ctx context.Context, clusterID string, nodes []*stor
 			verr = sv.VerifySealed(ctx, tr.Target.Name, &key.PublicKey, res.Iat, opts.SealKey)
 		} else {
 			verr = p.Verifier.Verify(ctx, tr.Target.Name, &key.PublicKey, res.Iat)
+		}
+		if nv, ok := p.Verifier.(NextVerifier); ok && verr == nil {
+			if err := nv.VerifyNext(ctx, shieldlist.NextName(tr.Target.Name), &key.PublicKey, res.Iat, opts.SealKey); err != nil {
+				verr = fmt.Errorf("next names: %w", err)
+			}
 		}
 		if verr != nil {
 			tr.VerifyErr = verr.Error()
@@ -236,7 +257,7 @@ func (p *Publisher) Publish(ctx context.Context, clusterID string, nodes []*stor
 				Result: summary, Verified: verified && !res.Manual, Manual: res.Manual,
 			}
 			if res.Manual {
-				cc.Last.Records = recs
+				cc.Last.Records, cc.Last.NextRecords = recs, nextRecs
 			}
 			return nil
 		}); err != nil {
@@ -340,6 +361,28 @@ func (v *DoHVerifier) Verify(ctx context.Context, fqdn string, pub *ecdsa.Public
 
 // VerifySealed is Verify for a list sealed with sealKey.
 func (v *DoHVerifier) VerifySealed(ctx context.Context, fqdn string, pub *ecdsa.PublicKey, wantIat int64, sealKey []byte) error {
+	return v.poll(ctx, fqdn, func(recs []string, now time.Time) (int64, error) {
+		pl, err := shieldlist.VerifyRecordsSealed(recs, pub, now, sealKey)
+		if err != nil {
+			return 0, err
+		}
+		return pl.Iat, nil
+	}, wantIat)
+}
+
+// VerifyNext reads back the next names published at fqdn (a dw2. name).
+func (v *DoHVerifier) VerifyNext(ctx context.Context, fqdn string, pub *ecdsa.PublicKey, wantIat int64, sealKey []byte) error {
+	return v.poll(ctx, fqdn, func(recs []string, now time.Time) (int64, error) {
+		nl, err := shieldlist.VerifyNextRecords(recs, pub, now, sealKey)
+		if err != nil {
+			return 0, err
+		}
+		return nl.Iat, nil
+	}, wantIat)
+}
+
+// poll asks the resolvers until check finds something issued at wantIat or later, or the time is up.
+func (v *DoHVerifier) poll(ctx context.Context, fqdn string, check func([]string, time.Time) (int64, error), wantIat int64) error {
 	now := v.Now
 	if now == nil {
 		now = time.Now
@@ -353,13 +396,13 @@ func (v *DoHVerifier) VerifySealed(ctx context.Context, fqdn string, pub *ecdsa.
 				last = err
 				continue
 			}
-			pl, err := shieldlist.VerifyRecordsSealed(recs, pub, now(), sealKey)
+			iat, err := check(recs, now())
 			if err != nil {
 				last = err
 				continue
 			}
-			if pl.Iat < wantIat {
-				last = fmt.Errorf("DNS still serves the previous list (issued %d, want %d)", pl.Iat, wantIat)
+			if iat < wantIat {
+				last = fmt.Errorf("DNS still serves the previous version (issued %d, want %d)", iat, wantIat)
 				continue
 			}
 			return nil
@@ -373,6 +416,33 @@ func (v *DoHVerifier) VerifySealed(ctx context.Context, fqdn string, pub *ecdsa.
 		case <-time.After(v.Interval):
 		}
 	}
+}
+
+// Fit keeps as many of nodes as fit in one plain DNS answer (512 bytes) at every name of the cluster:
+// the nodes already published first, so the list does not change for nothing, then the others by name.
+func Fit(c *store.Cluster, nodes []*store.Node) []*store.Node {
+	max := 255
+	for _, t := range c.Targets {
+		if m := shieldlist.MaxCompactNodes(t.Name, c.Sealed); m < max {
+			max = m
+		}
+	}
+	if len(nodes) <= max {
+		return nodes
+	}
+	published := map[string]bool{}
+	for _, k := range strings.Split(c.Last.NodesKey, ",") {
+		published[k] = true
+	}
+	sorted := append([]*store.Node(nil), nodes...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		pi, pj := published[sorted[i].Key()], published[sorted[j].Key()]
+		if pi != pj {
+			return pi
+		}
+		return sorted[i].Name < sorted[j].Name
+	})
+	return sorted[:max]
 }
 
 // targetNames are the names the apps should read the list from next time: every place the list is written to.

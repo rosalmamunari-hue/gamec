@@ -112,6 +112,15 @@ enum Resolvers {
         }
     }
 
+    /// Like `query`, for the next names at a dw2. name.
+    static func queryNext(cfg: DiscoveryConfig, name: String, minIat: Int64 = 0) -> [String] {
+        race(build(cfg), name: name, timeout: cfg.timeout, stagger: cfg.resolverStagger) {
+            guard let n = try? NextVerifier.parse($0, publicKeyB64: cfg.publicKey, now: Int64(Date().timeIntervalSince1970),
+                                                  listKeyB64: cfg.listKey) else { return false }
+            return n.iat >= minIat
+        }
+    }
+
     static func accepts(cfg: DiscoveryConfig, records: [String], minIat: Int64, now: Int64) -> Bool {
         guard let l = try? ListVerifier.parse(records, publicKeyB64: cfg.publicKey, now: now,
                                               listKeyB64: cfg.listKey) else { return false }

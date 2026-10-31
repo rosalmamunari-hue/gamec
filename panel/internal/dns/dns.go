@@ -19,7 +19,9 @@ import (
 // ErrManual is returned by the manual provider: the records must be pasted by hand.
 var ErrManual = errors.New("this DNS target is manual: publish the records yourself")
 
-func ours(v string) bool { return shieldlist.IsRecord(v) }
+// ours says whether a TXT value is one the panel manages: a list record in either format, or a next-names
+// record. The names the panel writes to are its own, so a long base64url value there is one of ours.
+func ours(v string) bool { return shieldlist.IsRecord(v) || shieldlist.LooksCompact(v) }
 
 type Provider interface {
 	Name() string

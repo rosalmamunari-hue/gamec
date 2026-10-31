@@ -6,6 +6,7 @@
 //
 //	signlist -gen-key list.key                       create the signing key, print the public key
 //	signlist -key list.key -nodes nodes.json         print TXT records (add each as a TXT record)
+//	signlist ... -format json                        the first, longer format (apps before v0.5.0)
 //	signlist -key list.key -nodes nodes.json -serve 127.0.0.1:8053   fake DoH server for tests
 //	signlist -check _gs.example.com -pub <key>       fetch the published records over DoH and verify them
 //
@@ -67,8 +68,8 @@ func loadKey(path string) (string, error) {
 }
 
 // dohHandler answers like Cloudflare's JSON DoH API; each record is returned as two quoted strings
-// ("part1" "part2"), the way long TXT values appear there.
-func dohHandler(records []string) http.Handler {
+// ("part1" "part2"), the way long TXT values appear there. Names under dw2. get the next-names records.
+func dohHandler(records, next []string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("type") != "TXT" {
 			http.Error(w, "only TXT", http.StatusBadRequest)
@@ -81,7 +82,11 @@ func dohHandler(records []string) http.Handler {
 			Data string `json:"data"`
 		}
 		var ans []answer
-		for _, rec := range records {
+		recs := records
+		if strings.HasPrefix(r.URL.Query().Get("name"), shieldlist.NextLabel+".") {
+			recs = next
+		}
+		for _, rec := range recs {
 			half := len(rec) / 2
 			ans = append(ans, answer{r.URL.Query().Get("name"), 16, 60, `"` + rec[:half] + `" "` + rec[half:] + `"`})
 		}
@@ -151,6 +156,7 @@ func main() {
 	cfgName := flag.String("name", "", "with -seal-config: the first name the app reads the list from")
 	cfgFallback := flag.String("fallback", "", "with -seal-config: comma-separated backup names")
 	genSeal := flag.Bool("gen-seal-key", false, "print a new random seal key and exit")
+	format := flag.String("format", "compact", "record format: compact (apps from v0.5.0) or json (older apps)")
 	dohURL := flag.String("doh", "https://cloudflare-dns.com/dns-query", "DoH JSON endpoint (with -check)")
 	flag.Parse()
 
@@ -227,7 +233,23 @@ func main() {
 			nextNames = append(nextNames, n)
 		}
 	}
-	recs, err := shieldlist.BuildRecordsOpts(k, nodes, time.Now(), valid, shieldlist.Options{Next: nextNames, SealKey: seal})
+	var recs, nextRecs []string
+	switch *format {
+	case "json":
+		recs, err = shieldlist.BuildRecordsOpts(k, nodes, time.Now(), valid, shieldlist.Options{Next: nextNames, SealKey: seal})
+	case "compact":
+		var rec string
+		if rec, err = shieldlist.BuildCompact(k, nodes, time.Now(), valid, seal); err == nil {
+			recs = []string{rec}
+		}
+		if err == nil && len(nextNames) > 0 {
+			if rec, err = shieldlist.BuildNextRecord(k, nextNames, time.Now(), valid, seal); err == nil {
+				nextRecs = []string{rec}
+			}
+		}
+	default:
+		log.Fatal("-format must be compact or json")
+	}
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -239,12 +261,15 @@ func main() {
 	for _, r := range recs {
 		fmt.Println(r)
 	}
+	if len(nextRecs) > 0 {
+		fmt.Printf("\nand this one at %s.<each of those names> (the names to read next time):\n\n%s\n", shieldlist.NextLabel, nextRecs[0])
+	}
 	fmt.Printf("\nvalid until %s, %d node(s)\n", time.Now().Add(valid).Format("2006-01-02"), len(nodes))
 
 	if *serve != "" {
 		fmt.Println("serving fake DoH on", *serve)
 		mux := http.NewServeMux()
-		mux.Handle("/dns-query", dohHandler(recs))
+		mux.Handle("/dns-query", dohHandler(recs, nextRecs))
 		log.Fatal(http.ListenAndServe(*serve, mux))
 	}
 }

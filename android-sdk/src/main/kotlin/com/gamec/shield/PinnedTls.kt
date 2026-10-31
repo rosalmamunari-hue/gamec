@@ -19,8 +19,12 @@ internal object PinnedTls {
         override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
             val spki = chain.firstOrNull()?.publicKey?.encoded
                 ?: throw CertificateException("empty chain")
-            val got = Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(spki))
-            if (got != pin) throw CertificateException("pin mismatch")
+            val got = MessageDigest.getInstance("SHA-256").digest(spki)
+            // the compact list carries the first 16 bytes of the hash, the older one all 32
+            val want = try { Base64.getDecoder().decode(pin) } catch (_: Exception) { ByteArray(0) }
+            if ((want.size != 16 && want.size != 32) || !MessageDigest.isEqual(got.copyOf(want.size), want)) {
+                throw CertificateException("pin mismatch")
+            }
         }
 
         override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()

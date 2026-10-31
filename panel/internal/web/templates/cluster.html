@@ -147,10 +147,13 @@
       </dl>
       {{end}}
       {{if $c.Last.Manual}}
-      <div class="alert alert-warning mt-3 mb-2">有「手动」域名：把下面每一行当成一条独立的 TXT 记录，贴进那个域名的 DNS，贴完才生效。</div>
-      <pre class="script" id="manual-records">{{range $c.Last.Records}}{{.}}
-{{end}}</pre>
-      <button type="button" class="btn btn-sm" data-copy="#manual-records">{{icon "copy"}}<span>复制</span></button>
+      <div class="alert alert-warning mt-3 mb-2">有「手动」域名：在那个域名的 DNS 里加两条 TXT 记录，贴完才生效（以前贴的那两条要删掉）。</div>
+      {{range $t := $c.Targets}}{{if eq $t.Provider "manual"}}
+      <div class="form-label mt-2">名字 <span class="mono">{{$t.Name}}</span> 的 TXT 记录</div>
+      <div class="copy-row"><div class="form-control secret-box small" id="manual-list">{{range $c.Last.Records}}{{.}}{{end}}</div><button type="button" class="btn btn-sm" data-copy="#manual-list">{{icon "copy"}}<span>复制</span></button></div>
+      <div class="form-label mt-2">名字 <span class="mono">dw2.{{$t.Name}}</span> 的 TXT 记录（下一批域名）</div>
+      <div class="copy-row"><div class="form-control secret-box small" id="manual-next">{{range $c.Last.NextRecords}}{{.}}{{end}}</div><button type="button" class="btn btn-sm" data-copy="#manual-next">{{icon "copy"}}<span>复制</span></button></div>
+      {{end}}{{end}}
       {{end}}
     </div>
     {{if $p.Admin}}
@@ -174,7 +177,7 @@
     <div class="card-header">
       <div>
         <h3 class="card-title">域名</h3>
-        <div class="card-subtitle">名单写在这些域名的 TXT 记录里。多放几个当备份，App 一个读不到会换下一个。</div>
+        <div class="card-subtitle">名单写在这些域名的 TXT 记录里；面板还会在每个域名前面加 <code>dw2.</code> 写一条「下一批域名」。多放几个当备份，App 一个读不到会换下一个。</div>
       </div>
       {{if $p.Admin}}<div class="card-actions"><button type="button" class="btn btn-sm" data-bs-toggle="modal" data-bs-target="#target-add">{{icon "plus"}}加域名</button></div>{{end}}
     </div>

@@ -55,6 +55,8 @@ type Published struct {
 	Verified bool      `json:"verified"`
 	Manual   bool      `json:"manual"` // records are waiting to be pasted by hand
 	Records  []string  `json:"records,omitempty"`
+	// NextRecords go at the dw2. name in front of each target (the names to read from next time).
+	NextRecords []string `json:"next_records,omitempty"`
 }
 
 type Cluster struct {

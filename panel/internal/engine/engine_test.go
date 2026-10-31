@@ -28,16 +28,21 @@ const pin = "c65StCewbul2pPTQFu2ZuxI3TLhWb6lxMQacqAJDYoE="
 
 type fakeProv struct {
 	mu     sync.Mutex
-	calls  [][]string
+	calls  [][]string // writes of the list
+	next   [][]string // writes of the next names (at dw2.<name>)
 	fail   error
 	manual bool
 	ctxErr []error // ctx.Err() as each write saw it
 }
 
 func (f *fakeProv) Name() string { return "fake" }
-func (f *fakeProv) ReplaceTXT(ctx context.Context, _, _ string, values []string) error {
+func (f *fakeProv) ReplaceTXT(ctx context.Context, _, fqdn string, values []string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if strings.HasPrefix(fqdn, shieldlist.NextLabel+".") {
+		f.next = append(f.next, append([]string(nil), values...))
+		return f.fail
+	}
 	f.ctxErr = append(f.ctxErr, ctx.Err())
 	f.calls = append(f.calls, append([]string(nil), values...))
 	if f.manual {
@@ -673,6 +678,8 @@ func TestActiveNodesAreNeverMixedAcrossClusters(t *testing.T) {
 	}
 }
 
+// The names to read next time go in their own record at dw2.<name>, so the list itself stays small enough for
+// a plain DNS answer; both are signed and, for a sealed cluster, sealed.
 func TestPublishCarriesTheTargetNamesAsNextAndCanSealTheList(t *testing.T) {
 	e := newEnv(t)
 	c := e.addCluster("official")
@@ -683,9 +690,17 @@ func TestPublishCarriesTheTargetNamesAsNextAndCanSealTheList(t *testing.T) {
 		t.Fatalf("%v %+v", err, res)
 	}
 	pk, _ := shieldlist.ParsePublicKeyB64(e.cluster(c.ID).PublicKey)
-	pl, err := shieldlist.VerifyRecords(e.provFor(c).last(), pk, e.now)
-	if err != nil || len(pl.Next) != 1 || pl.Next[0] != c.Targets[0].Name {
-		t.Fatalf("%v next=%v", err, pl)
+	sent := e.provFor(c).last()
+	if _, err := shieldlist.VerifyRecords(sent, pk, e.now); err != nil || len(sent) != 1 {
+		t.Fatalf("%v %v", err, sent)
+	}
+	if size := shieldlist.AnswerSize(c.Targets[0].Name, len(sent[0])); size > 512 {
+		t.Fatalf("the answer would be %d bytes", size)
+	}
+	p := e.provFor(c)
+	nl, err := shieldlist.VerifyNextRecords(p.next[len(p.next)-1], pk, e.now, nil)
+	if err != nil || len(nl.Names) != 1 || nl.Names[0] != c.Targets[0].Name {
+		t.Fatalf("%v next=%+v", err, nl)
 	}
 
 	// sealed: the key lives in the vault, the plain check no longer reads it
@@ -697,9 +712,12 @@ func TestPublishCarriesTheTargetNamesAsNextAndCanSealTheList(t *testing.T) {
 	if res, err = e.pub.Publish(context.Background(), c.ID, []*store.Node{a}, "alice", "", "x"); err != nil || !res.OK {
 		t.Fatalf("%v %+v", err, res)
 	}
-	sent := e.provFor(c).last()
+	sent = e.provFor(c).last()
 	if _, err := shieldlist.VerifyRecords(sent, pk, e.now); err == nil {
 		t.Fatal("sealed list readable without the key")
+	}
+	if _, err := shieldlist.VerifyNextRecords(p.next[len(p.next)-1], pk, e.now, nil); err == nil {
+		t.Fatal("sealed next names readable without the key")
 	}
 	if _, err := shieldlist.VerifyRecordsSealed(sent, pk, e.now, seal); err != nil {
 		t.Fatal(err)
@@ -713,5 +731,34 @@ func TestPublishRefusesToSealWithoutAKey(t *testing.T) {
 	e.st.Mutate(func(s *store.State) error { s.Cluster(c.ID).Sealed = true; return nil })
 	if _, err := e.pub.Publish(context.Background(), c.ID, []*store.Node{a}, "alice", "", "x"); err == nil {
 		t.Fatal("published a plain list for a cluster that must be sealed")
+	}
+}
+
+// More nodes than fit in one plain DNS answer: the ones already published stay, the rest wait, and the
+// choice does not change from one round to the next.
+func TestFitKeepsTheListSmallAndStable(t *testing.T) {
+	e := newEnv(t)
+	c := e.addCluster("official")
+	var nodes []*store.Node
+	for i := 0; i < 20; i++ {
+		nodes = append(nodes, e.addNode(c, fmt.Sprintf("n%02d", i)))
+	}
+	cl := e.cluster(c.ID)
+	max := shieldlist.MaxCompactNodes(cl.Targets[0].Name, false)
+	cl.Last.NodesKey = store.NodesKey(nodes[15:]) // five published already
+	got := Fit(cl, nodes)
+	if len(got) != max {
+		t.Fatalf("kept %d, want %d", len(got), max)
+	}
+	for _, n := range nodes[15:] {
+		if !strings.Contains(store.NodesKey(got), n.Key()) {
+			t.Errorf("%s was published and should stay", n.Name)
+		}
+	}
+	if store.NodesKey(Fit(cl, nodes)) != store.NodesKey(got) {
+		t.Error("the choice changed between two rounds")
+	}
+	if len(Fit(cl, nodes[:3])) != 3 {
+		t.Error("a short list is kept as it is")
 	}
 }

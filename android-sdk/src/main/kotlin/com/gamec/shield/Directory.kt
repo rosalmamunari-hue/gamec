@@ -6,6 +6,7 @@ import java.security.KeyFactory
 import java.security.Signature
 import java.security.spec.X509EncodedKeySpec
 import java.util.Base64
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.ReentrantLock
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
@@ -64,6 +65,13 @@ internal object ListVerifier {
 
         var best: NodeList? = null
         var lastError: Exception = IllegalStateException("no list records")
+        for (r in records) { // the compact format: each value is a whole list on its own
+            val o = try { Compact.open(r, publicKeyB64, listKeyB64, Compact.KIND_LIST) } catch (e: Exception) { lastError = e; null } ?: continue
+            val nodes = Compact.nodes(o)
+            if (nodes == null) { lastError = IllegalArgumentException("malformed compact list"); continue }
+            if (nowSec > o.exp) { lastError = IllegalStateException("node list expired"); continue }
+            if (best == null || o.iat > best.iat) best = NodeList(nodes, o.iat, o.exp, listOf(r))
+        }
         for ((n, parts) in groups) {
             if (n in dup || parts.size != n) continue
             try {
@@ -135,10 +143,14 @@ internal class NodeDirectory(
     private var floorIat = 0L
     private var nextTryAt = 0L
     private var lastTryAt = Long.MIN_VALUE / 2
+    /** The names to read from next time, from the dw2. record that goes with a compact list. */
+    private var nextNames: NextNames? = null
+    private val nextBusy = AtomicBoolean(false)
 
     init {
         val saved = try { cfg.store?.load().orEmpty() } catch (_: Exception) { emptyList() }
         if (saved.isNotEmpty()) {
+            try { nextNames = NextVerifier.parse(saved, cfg.publicKey, clock(), cfg.listKey) } catch (_: Exception) {}
             try {
                 val l = ListVerifier.parse(saved, cfg.publicKey, clock(), cfg.listKey)
                 current = l
@@ -182,19 +194,21 @@ internal class NodeDirectory(
 
     /** The names the last good list pointed to come first; the ones built into the app are the fallback. */
     private fun names(): List<String> =
-        ((current?.next ?: emptyList()) + cfg.name + cfg.fallbackNames).distinct()
+        ((nextNames?.names ?: current?.next ?: emptyList()) + cfg.name + cfg.fallbackNames).distinct()
 
     private fun usable(now: Long): NodeList? = current?.takeIf { now <= it.exp }
 
     private fun fetch(now: Long): NodeList? {
         val (names, floor) = synchronized(lock) { names() to maxOf(floorIat, current?.iat ?: 0L) }
         var fresh: NodeList? = null
+        var from = ""
         for (n in names) {
             try {
                 val recs = queryTxt?.invoke(n) ?: Resolvers.query(cfg, n, floor)
                 val f = ListVerifier.parse(recs, cfg.publicKey, now, cfg.listKey)
                 if (f.iat < floor) continue // stale copy at this name; try the next
                 fresh = f
+                from = n
                 break
             } catch (_: Exception) {
                 // unreadable or forged at this name; try the next
@@ -210,7 +224,38 @@ internal class NodeDirectory(
             floorIat = f.iat
             nextTryAt = now + cfg.refreshSec
         }
-        try { cfg.store?.save(f.records) } catch (_: Exception) {}
+        save()
+        // a compact list leaves the names to read next time to a record of its own, read in the background
+        if (f.records.size == 1 && Compact.looksCompact(f.records[0])) fetchNext(from, now)
         return f
     }
+
+    private fun save() {
+        val recs = synchronized(lock) { (current?.records ?: emptyList()) + (nextNames?.records ?: emptyList()) }
+        if (recs.isNotEmpty()) try { cfg.store?.save(recs) } catch (_: Exception) {}
+    }
+
+    /** Reads dw2.<[name]> without holding anyone up; a newer valid answer replaces the names kept. */
+    private fun fetchNext(name: String, now: Long) {
+        if (!nextBusy.compareAndSet(false, true)) return
+        Thread {
+            try {
+                val at = Compact.nextName(name)
+                val minIat = synchronized(lock) { nextNames?.iat ?: 0L }
+                val recs = queryTxt?.invoke(at) ?: Resolvers.queryNext(cfg, at, minIat)
+                val nn = NextVerifier.parse(recs, cfg.publicKey, now, cfg.listKey)
+                val newer = synchronized(lock) {
+                    (nn.iat >= (nextNames?.iat ?: 0L)).also { if (it) nextNames = nn }
+                }
+                if (newer) save()
+            } catch (_: Exception) {
+                // no next names this time; the ones kept, or the built-in names, still work
+            } finally {
+                nextBusy.set(false)
+            }
+        }.also { it.isDaemon = true; it.start() }
+    }
+
+    /** For tests: the names the directory would read from, in order. */
+    internal fun namesForTest(): List<String> = synchronized(lock) { names() }
 }

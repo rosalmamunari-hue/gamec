@@ -67,6 +67,11 @@ enum ListVerifier {
 
         var best: NodeList?
         var lastError: Error = ShieldError.badResponse
+        for r in records { // the compact format: each value is a whole list on its own
+            guard let o = Compact.open(r, publicKeyB64: publicKeyB64, listKeyB64: listKeyB64, kind: Compact.kindList) else { continue }
+            guard let nodes = Compact.nodes(o), now <= o.exp else { lastError = ShieldError.badResponse; continue }
+            if best == nil || o.iat > best!.iat { best = NodeList(nodes: nodes, iat: o.iat, exp: o.exp, records: [r]) }
+        }
         for (n, parts) in groups where !ambiguous.contains(n) && parts.count == n {
             do {
                 let body = (1...n).map { parts[$0]! }.joined()
@@ -124,6 +129,9 @@ final class NodeDirectory {
     private var floorIat: Int64 = 0
     private var nextTryAt: Int64 = 0
     private var lastTryAt: Int64?
+    /// The names to read from next time, from the dw2. record that goes with a compact list.
+    private var nextNames: NextNames?
+    private var nextBusy = false
 
     init(cfg: DiscoveryConfig,
          queryTxt: ((String) -> [String])? = nil,
@@ -132,6 +140,7 @@ final class NodeDirectory {
         self.queryTxt = queryTxt
         self.clock = clock
         if let saved = cfg.store?.load(), !saved.isEmpty {
+            nextNames = try? NextVerifier.parse(saved, publicKeyB64: cfg.publicKey, now: clock(), listKeyB64: cfg.listKey)
             if let l = try? ListVerifier.parse(saved, publicKeyB64: cfg.publicKey, now: clock(), listKeyB64: cfg.listKey) {
                 current = l
                 floorIat = l.iat
@@ -180,7 +189,13 @@ final class NodeDirectory {
     /// The names the last good list pointed to come first; the ones built into the app are the fallback.
     private func names() -> [String] {
         var seen = Set<String>()
-        return ((current?.next ?? []) + [cfg.name] + cfg.fallbackNames).filter { seen.insert($0).inserted }
+        return ((nextNames?.names ?? current?.next ?? []) + [cfg.name] + cfg.fallbackNames).filter { seen.insert($0).inserted }
+    }
+
+    /// For tests: the names the directory would read from, in order.
+    func namesForTest() -> [String] {
+        lock.lock(); defer { lock.unlock() }
+        return names()
     }
 
     private func usable(_ now: Int64) -> NodeList? {
@@ -194,12 +209,14 @@ final class NodeDirectory {
         let floor = max(floorIat, current?.iat ?? 0)
         lock.unlock()
         var found: NodeList?
+        var from = ""
         for n in candidates {
             let recs = queryTxt?(n) ?? Resolvers.query(cfg: cfg, name: n, minIat: floor)
             guard let f = try? ListVerifier.parse(recs, publicKeyB64: cfg.publicKey, now: now,
                                                   listKeyB64: cfg.listKey) else { continue }
             if f.iat < floor { continue } // stale copy at this name; try the next
             found = f
+            from = n
             break
         }
         lock.lock()
@@ -212,7 +229,39 @@ final class NodeDirectory {
         floorIat = fresh.iat
         nextTryAt = now + Int64(cfg.refreshInterval)
         lock.unlock()
-        cfg.store?.save(fresh.records)
+        save()
+        // a compact list leaves the names to read next time to a record of its own, read in the background
+        if fresh.records.count == 1 && Compact.looksCompact(fresh.records[0]) { fetchNext(from, now: now) }
         return fresh
+    }
+
+    private func save() {
+        lock.lock()
+        let recs = (current?.records ?? []) + (nextNames?.records ?? [])
+        lock.unlock()
+        if !recs.isEmpty { cfg.store?.save(recs) }
+    }
+
+    /// Reads dw2.<name> without holding anyone up; a newer valid answer replaces the names kept.
+    private func fetchNext(_ name: String, now: Int64) {
+        lock.lock()
+        if nextBusy { lock.unlock(); return }
+        nextBusy = true
+        let minIat = nextNames?.iat ?? 0
+        lock.unlock()
+        Blocking.run("gamec.shield.next") { [self] in
+            let at = Compact.nextName(name)
+            let recs = queryTxt?(at) ?? Resolvers.queryNext(cfg: cfg, name: at, minIat: minIat)
+            let nn = try? NextVerifier.parse(recs, publicKeyB64: cfg.publicKey, now: now, listKeyB64: cfg.listKey)
+            lock.lock()
+            var newer = false
+            if let nn = nn, nn.iat >= (nextNames?.iat ?? 0) {
+                nextNames = nn
+                newer = true
+            }
+            nextBusy = false
+            lock.unlock()
+            if newer { save() }
+        }
     }
 }

@@ -1,6 +1,9 @@
 package com.gamec.shield
 
-/** An edge node. [pinSha256] is base64(SHA-256(SubjectPublicKeyInfo)) of the node's certificate. */
+/**
+ * An edge node. [pinSha256] is base64(SHA-256(SubjectPublicKeyInfo)) of the node's certificate, or of its
+ * first 16 bytes (as the compact list carries it).
+ */
 data class Node(val host: String, val port: Int, val pinSha256: String) {
     override fun toString() = "$host:$port"
 }

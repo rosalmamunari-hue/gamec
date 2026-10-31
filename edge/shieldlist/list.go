@@ -8,6 +8,9 @@
 // The list can also be sealed: the first half is then base64url(nonce || AES-256-GCM(payload)) instead of
 // base64url(payload); the signature is still over the plain payload. An app without the key cannot read it.
 // The apps (Android, iOS) implement the verifying side of exactly this format.
+//
+// This first format is kept for apps before v0.5.0; the panel now publishes the compact format (compact.go),
+// which fits a plain 512-byte DNS answer and carries the next names in a record of its own.
 package shieldlist
 
 import (
@@ -175,8 +178,9 @@ func BuildRecordsOpts(k *ecdsa.PrivateKey, nodes []Node, now time.Time, valid ti
 var recordRe = regexp.MustCompile(`^[0-9]{1,3}/[0-9]{1,3}:`)
 var bareRe = regexp.MustCompile(`^[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}$`)
 
-// IsRecord says whether a TXT value is one of the list's records (the "<i>/<n>:" lead-in). Other TXT values
-// at the same name are none of our business.
+// IsRecord says whether a TXT value is one of the list's records in the first format (the "<i>/<n>:" lead-in,
+// or a bare list). Other TXT values at the same name are none of our business. See LooksCompact for the
+// compact format.
 func IsRecord(v string) bool { return recordRe.MatchString(v) || bareRe.MatchString(v) }
 
 // VerifyRecords reassembles the records and checks the signature and expiry (what the apps do).
@@ -205,7 +209,12 @@ func VerifyRecordsSealed(records []string, pub *ecdsa.PublicKey, now time.Time, 
 		}
 		g[i] = chunk
 	}
+	var compact []string
 	for _, r := range records {
+		if LooksCompact(r) {
+			compact = append(compact, r)
+			continue
+		}
 		if !IsRecord(r) {
 			continue
 		}
@@ -251,6 +260,25 @@ func VerifyRecordsSealed(records []string, pub *ecdsa.PublicKey, now time.Time, 
 		p, err := verifyBody(sb.String(), pub, now, sealKey)
 		if err != nil {
 			lastErr = err
+			continue
+		}
+		if best == nil || p.Iat > best.Iat {
+			best = p
+		}
+	}
+	for _, v := range compact { // the compact format: each value is a whole list on its own
+		raw, err := openCompact(v, pub, sealKey, kindList)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		p, err := parseCompactList(raw)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if now.Unix() > p.Exp {
+			lastErr = errors.New("list expired")
 			continue
 		}
 		if best == nil || p.Iat > best.Iat {

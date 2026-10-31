@@ -22,6 +22,14 @@ enum PinnedTLS {
         return Data(digest).base64EncodedString()
     }
 
+    /// Whether the key's pin (all 32 bytes) matches the expected one: all of it, or its first 16 bytes as the
+    /// compact list carries it. Anything shorter never matches.
+    static func matches(_ got: String?, _ want: String) -> Bool {
+        guard let g = got.flatMap({ Data(base64Encoded: $0) }), g.count == 32,
+              let w = Data(base64Encoded: want), w.count == 16 || w.count == 32 else { return false }
+        return g.prefix(w.count) == w
+    }
+
     static func parameters(for node: Node) -> NWParameters {
         let tls = NWProtocolTLS.Options()
         let sec = tls.securityProtocolOptions
@@ -30,7 +38,7 @@ enum PinnedTLS {
             let secTrust = sec_trust_copy_ref(trust).takeRetainedValue()
             guard let chain = SecTrustCopyCertificateChain(secTrust) as? [SecCertificate],
                   let leaf = chain.first else { return complete(false) }
-            complete(pin(of: leaf) == node.pinSha256)
+            complete(matches(pin(of: leaf), node.pinSha256))
         }, verifyQueue)
 
         let tcp = NWProtocolTCP.Options()

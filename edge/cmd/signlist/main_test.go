@@ -8,7 +8,7 @@ import (
 
 func TestDohHandlerShape(t *testing.T) {
 	recs := []string{"1/1:abcdefghij"}
-	srv := httptest.NewServer(dohHandler(recs))
+	srv := httptest.NewServer(dohHandler(recs, []string{"next-record"}))
 	defer srv.Close()
 	resp, err := srv.Client().Get(srv.URL + "/?name=x.example&type=TXT")
 	if err != nil {
@@ -26,5 +26,20 @@ func TestDohHandlerShape(t *testing.T) {
 	if out.Status != 0 || len(out.Answer) != 1 || out.Answer[0].Type != 16 ||
 		out.Answer[0].Data != `"1/1:abc" "defghij"` {
 		t.Fatalf("unexpected DoH reply: %+v", out)
+	}
+}
+
+func TestDohHandlerServesTheNextNamesUnderDw2(t *testing.T) {
+	srv := httptest.NewServer(dohHandler([]string{"list-record"}, []string{"next-record"}))
+	defer srv.Close()
+	resp, err := srv.Client().Get(srv.URL + "/?name=dw2.x.example&type=TXT")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out struct{ Answer []struct{ Data string } }
+	json.NewDecoder(resp.Body).Decode(&out)
+	if len(out.Answer) != 1 || out.Answer[0].Data != `"next-" "record"` {
+		t.Fatalf("%+v", out)
 	}
 }
