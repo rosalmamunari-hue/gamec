@@ -16,6 +16,10 @@
         <div class="addr-big mb-1">{{$n.Host}}:{{$n.Port}}</div>
         <div class="text-secondary">{{if ne $v.Status "ok"}}{{$v.Detail}} · {{end}}{{if $v.Latency}}连接耗时 {{$v.Latency}}{{end}}{{if not $v.Checked.IsZero}} · {{clock $v.Checked}} 检查过{{end}}</div>
       </div>
+      {{if and $p.Admin (eq $v.Status "paused")}}
+      <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/resume"><input type="hidden" name="csrf" value="{{$p.CSRF}}">
+        <button class="btn btn-primary">{{icon "player-play"}}取消暂停，马上放回名单</button></form>
+      {{end}}
     </div>
     {{if $v.Recent}}
     <div class="mt-3">
@@ -24,6 +28,76 @@
     </div>
     {{end}}
   </div>
+</div>
+
+{{/* ---------------------------------------------------------------- connections */}}
+{{$t := $v.T}}
+<div class="card mb-3" id="traffic">
+  <div class="card-header">
+    <div>
+      <h3 class="card-title">连接详情</h3>
+      <div class="card-subtitle">节点自己报的数字，面板每分钟读一次。{{if $t.Has}}{{clock $t.At}} 读的{{if $t.Stale}}，<span class="text-warning">已经有一会儿没读到新的了</span>{{end}}。{{end}}</div>
+    </div>
+    <div class="card-actions">
+      <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/traffic"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button class="btn btn-sm" data-busy="读取中…">{{icon "refresh"}}刷新</button></form>
+    </div>
+  </div>
+  {{if $t.Has}}
+  <div class="card-body border-bottom">
+    <div class="row g-3 text-center">
+      <div class="col-6 col-md-3"><div class="h1 mb-0">{{$t.Active}}</div><div class="text-secondary small">当前连接</div></div>
+      <div class="col-6 col-md-3"><div class="h1 mb-0">{{$t.Devices}}</div><div class="text-secondary small">在线设备</div></div>
+      <div class="col-6 col-md-3"><div class="h1 mb-0">{{$t.IPs}}</div><div class="text-secondary small">来源 IP</div></div>
+      <div class="col-6 col-md-3"><div class="h3 mb-0 mt-2">↑ {{$t.UpRate}}</div><div class="h3 mb-0">↓ {{$t.DownRate}}</div><div class="text-secondary small">最近一分钟的速度</div></div>
+    </div>
+    <div class="mt-3">
+      <div class="d-flex small text-secondary mb-1"><span class="flex-fill">节点容量：{{$t.Active}} / {{$t.MaxConns}} 个连接</span><span>{{$t.Load}}%</span></div>
+      <div class="progress progress-sm"><div class="progress-bar {{if ge $t.Load 80}}bg-danger{{else if ge $t.Load 50}}bg-warning{{end}} w-{{if ge $t.Load 100}}100{{else if ge $t.Load 75}}75{{else if ge $t.Load 50}}50{{else if ge $t.Load 25}}25{{else}}0{{end}}" role="progressbar" aria-label="节点容量"></div></div>
+    </div>
+    {{if $t.Spark}}
+    <div class="mt-3">
+      <div class="d-flex small text-secondary"><span class="flex-fill">当前连接数，从 {{clock $t.SparkFrom}} 到现在</span><span>最高 {{$t.SparkMax}}</span></div>
+      <svg class="spark" viewBox="0 0 300 48" preserveAspectRatio="none" role="img" aria-label="当前连接数的变化"><polyline points="{{$t.Spark}}"/></svg>
+    </div>
+    {{end}}
+  </div>
+  <div class="card-body border-bottom">
+    <div class="datagrid">
+      <div class="datagrid-item"><div class="datagrid-title">节点程序已运行</div><div class="datagrid-content">{{$t.Uptime}}{{if $t.Version}} <span class="text-secondary small mono">{{$t.Version}}</span>{{end}}</div></div>
+      <div class="datagrid-item"><div class="datagrid-title">这段时间共转发连接</div><div class="datagrid-content">{{$t.Relays}} 个</div></div>
+      <div class="datagrid-item"><div class="datagrid-title">发出令牌</div><div class="datagrid-content">{{$t.Tokens}} 个</div></div>
+      <div class="datagrid-item"><div class="datagrid-title">累计流量</div><div class="datagrid-content">↑ {{$t.Up}} · ↓ {{$t.Down}}</div></div>
+      <div class="datagrid-item"><div class="datagrid-title">单个 IP 最多</div><div class="datagrid-content">{{$t.MaxPerIP}} 个连接</div></div>
+    </div>
+    <div class="form-hint mt-2">上行是玩家发给服务器的，下行是服务器发给玩家的。</div>
+  </div>
+  <div class="card-body border-bottom">
+    <div class="form-label">被挡掉的连接 <span class="text-secondary fw-normal">（节点程序启动以来，共 {{$t.RefusedAll}} 个）</span></div>
+    {{if $t.Refused}}
+    <table class="table table-sm mb-0"><tbody>
+      {{range $t.Refused}}<tr><td>{{.Word}}</td><td class="text-end mono">{{.N}}</td></tr>{{end}}
+    </tbody></table>
+    {{else}}<div class="text-secondary">一个都没有。</div>{{end}}
+  </div>
+  <div class="card-body">
+    <div class="form-label">现在连接最多的 IP <span class="text-secondary fw-normal">（最多列 20 个；IPv6 按 /64 算一个）</span></div>
+    {{if $t.Top}}
+    <div class="table-responsive">
+    <table class="table table-sm mb-0">
+      <thead><tr><th>IP</th><th class="text-end">连接</th><th class="text-end">设备</th></tr></thead>
+      <tbody>{{range $t.Top}}<tr><td class="mono">{{.IP}}</td><td class="text-end">{{.Relays}}{{if ge .Relays $t.MaxPerIP}} <span class="badge bg-danger-lt">到上限了</span>{{end}}</td><td class="text-end">{{.Devices}}</td></tr>{{end}}</tbody>
+    </table>
+    </div>
+    {{else}}<div class="text-secondary">现在没有玩家连着这台。</div>{{end}}
+  </div>
+  {{else}}
+  <div class="card-body text-secondary">
+    {{if $t.Sealed}}保险库锁着，面板读不到令牌密钥，没法向节点要数据。<a href="/unseal">去解锁</a>。
+    {{else if $t.Old}}这台节点没有回答。多半是节点程序还是旧版本（<b>v0.5.1 起才会报连接数据</b>），升级节点程序后就有了。
+    {{else if $t.Err}}没读到：{{$t.Err}}
+    {{else}}还没读过，一分钟内会读；也可以点右上角「刷新」。{{end}}
+  </div>
+  {{end}}
 </div>
 
 {{/* ---------------------------------------------------------------- remote management */}}

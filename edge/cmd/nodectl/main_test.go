@@ -372,3 +372,15 @@ func TestAStagedSymlinkIsRefused(t *testing.T) {
 		t.Fatal("something was installed")
 	}
 }
+
+func TestStartingByHandCancelsTheStopForTimer(t *testing.T) {
+	for _, verb := range []string{"start", "stop", "restart"} {
+		e, sys, _ := newEnv(t)
+		if code, err := e.dispatch([]string{"-unit", "gamec-edge-x", verb}); err != nil || code != 0 {
+			t.Fatalf("%s: %d %v", verb, code, err)
+		}
+		if sys.calls[0] != "systemctl stop gamec-edge-x-restore-*.timer" {
+			t.Fatalf("%s: the stop-for timers must be dropped first: %v", verb, sys.calls)
+		}
+	}
+}

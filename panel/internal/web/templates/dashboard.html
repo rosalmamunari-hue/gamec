@@ -27,10 +27,15 @@
           <div class="col-4"><div class="h3 mb-0">{{if .C.Last.Exp}}{{daysLeft .C.Last.Exp}}{{else}}—{{end}}</div><div class="text-secondary small">名单{{if .C.Last.Exp}}剩余天数{{else}}未发布{{end}}</div></div>
           <div class="col-4"><div class="h3 mb-0">{{if .C.AutoPublish}}<span class="text-success">开</span>{{else}}<span class="text-secondary">关</span>{{end}}</div><div class="text-secondary small">自动维护</div></div>
         </div>
+        {{if .Traffic.Reporting}}<div class="traffic-sum small mb-3">
+          <span>{{icon "plug-connected"}}<b>{{.Traffic.Active}}</b> 连接</span>
+          <span>{{icon "users"}}<b>{{.Traffic.Devices}}</b> 设备</span>
+          <span class="text-secondary">↓ {{.Traffic.DownRate}}</span>
+        </div>{{end}}
         {{range .Problems}}<div class="d-flex gap-2 small mb-1 {{if .Bad}}text-danger{{else}}text-warning{{end}}">{{icon "alert-triangle"}}<span>{{.Text}}</span></div>{{end}}
         {{if .Nodes}}
         <div class="mt-3">
-        {{range .Nodes}}<div class="d-flex align-items-center small py-1 border-top">{{template "status" .}}<span class="ms-2 flex-fill">{{.N.Name}}</span><span class="text-secondary">{{.Latency}}</span></div>{{end}}
+        {{range .Nodes}}<div class="d-flex align-items-center small py-1 border-top">{{template "status" .}}<span class="ms-2 flex-fill">{{.N.Name}}</span>{{if .T.Has}}<span class="text-secondary me-2">{{.T.Active}} 连接</span>{{end}}<span class="text-secondary">{{.Latency}}</span></div>{{end}}
         </div>
         {{end}}
       </div>

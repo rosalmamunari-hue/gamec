@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"gamec/edge/shieldclient"
 	"gamec/panel/internal/engine"
 	"gamec/panel/internal/notify"
 	"gamec/panel/internal/store"
@@ -56,6 +57,40 @@ func TestDemoServer(t *testing.T) {
 	a.post("/cluster/"+official.ID+"/publish", url.Values{"csrf": {a.csrf()}}, nil)
 	e.st.Mutate(func(st *store.State) error { st.Cluster(official.ID).Last.Verified = true; return nil })
 	e.s.origins.res = map[string]originResult{official.ID: {At: time.Now(), Err: "连接超时（被防火墙挡住了）"}}
+
+	// an hour of connection numbers for hk-1 and hk-2; sg-1 runs an older node program that reports none
+	started := time.Now().Add(-26 * time.Hour).Unix()
+	for _, n := range nodes {
+		if n.Name == "sg-1" {
+			e.s.traffic.record(n.ID, nil, shieldclient.ErrNoStats, time.Now())
+			continue
+		}
+		var up, down uint64 = 3 << 30, 41 << 30
+		for m := 0; m < 60; m++ {
+			at := time.Now().Add(time.Duration(m-59) * time.Minute)
+			active := 180 + 60*((m/7)%3) + m*2
+			if n.Name == "hk-2" {
+				active = active * 2 / 3
+			}
+			up += uint64(active) * 900
+			down += uint64(active) * 14000
+			st := &shieldclient.NodeStats{At: at.Unix(), Started: started, MaxConns: 10000, MaxPerIP: 20,
+				Active: active, Devices: active * 2 / 5, IPs: active / 3, Relays: 48211 + uint64(m)*97, Tokens: 19302 + uint64(m)*31,
+				BytesUp: up, BytesDown: down, Version: "v0.5.1",
+				Refused: map[string]uint64{"no_frame": 3120, "bad_token": 41, "per_ip": 12, "token_refused": 6},
+				Top: []shieldclient.IPLoad{{IP: "223.104.3.17", Relays: 20, Devices: 9}, {IP: "117.136.12.88", Relays: 14, Devices: 6},
+					{IP: "2409:8a55:1a2b:3c4d::/64", Relays: 9, Devices: 3}, {IP: "112.97.54.201", Relays: 4, Devices: 2}}}
+			e.s.traffic.record(n.ID, st, nil, at)
+		}
+	}
+	e.st.Mutate(func(st *store.State) error {
+		for _, n := range st.NodesOf(official.ID) {
+			if n.Name == "hk-2" {
+				n.DisabledUntil = time.Now().Add(24 * time.Minute)
+			}
+		}
+		return nil
+	})
 
 	e.seedCluster("测试渠道")
 	e.st.Mutate(func(st *store.State) error {

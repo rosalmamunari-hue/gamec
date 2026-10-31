@@ -16,6 +16,14 @@
           · 名单{{if $c.Last.At.IsZero}}还没发布{{else}}{{$row.Expiry}}{{end}}
           · 自动维护{{if $c.AutoPublish}}已开启{{else}}没开{{end}}
         </div>
+        {{with $row.Traffic}}{{if .Reporting}}
+        <div class="traffic-sum mt-2">
+          <span>{{icon "plug-connected"}}<b>{{.Active}}</b> 个连接</span>
+          <span>{{icon "users"}}<b>{{.Devices}}</b> 台设备</span>
+          <span>{{icon "activity"}}↑ {{.UpRate}} · ↓ {{.DownRate}}</span>
+          {{if lt .Reporting .Nodes}}<span class="text-secondary small">（{{.Reporting}}/{{.Nodes}} 个节点报了数据{{if .Old}}，{{.Old}} 个要升级{{end}}）</span>{{end}}
+        </div>
+        {{else if .Old}}<div class="text-secondary small mt-2">{{icon "info-circle"}} 节点程序升级到 v0.5.1 后，这里会显示在线连接数和流量。</div>{{end}}{{end}}
         {{if $row.Problems}}
         <div class="mt-3">
           {{range $row.Problems}}
@@ -70,7 +78,7 @@
   {{if $row.Nodes}}
   <div class="table-responsive">
     <table class="table table-vcenter card-table">
-      <thead><tr><th>状态</th><th>名称</th><th class="d-none d-md-table-cell">地址</th><th class="d-none d-md-table-cell">连接耗时</th><th class="d-none d-lg-table-cell">说明</th>{{if $p.Admin}}<th class="w-1"></th>{{end}}</tr></thead>
+      <thead><tr><th>状态</th><th>名称</th><th class="d-none d-md-table-cell">地址</th><th class="d-none d-md-table-cell">连接耗时</th><th>在线</th><th class="d-none d-lg-table-cell">说明</th>{{if $p.Admin}}<th class="w-1"></th>{{end}}</tr></thead>
       <tbody>
       {{range $row.Nodes}}
       {{$n := .N}}
@@ -81,6 +89,7 @@
           {{if ne .Status "ok"}}<div class="d-lg-none small text-secondary">{{.Detail}}</div>{{end}}</td>
         <td class="mono d-none d-md-table-cell">{{$n.Host}}:{{$n.Port}}</td>
         <td class="text-secondary d-none d-md-table-cell">{{if .Latency}}{{.Latency}}{{else}}—{{end}}</td>
+        <td class="text-nowrap">{{if .T.Has}}<a href="/cluster/{{$c.ID}}/node/{{$n.ID}}#traffic" class="text-reset" title="↑ {{.T.UpRate}} ↓ {{.T.DownRate}}">{{.T.Active}} 连接</a><div class="small text-secondary">{{.T.Devices}} 设备</div>{{else if .T.Old}}<span class="text-secondary small" title="v0.5.1 起的节点程序才会报连接数据">要升级</span>{{else}}<span class="text-secondary">—</span>{{end}}</td>
         <td class="text-secondary small d-none d-lg-table-cell">{{if ne .Status "ok"}}{{.Detail}}{{else if not .Checked.IsZero}}{{clock .Checked}} 检查过{{end}}</td>
         {{if $p.Admin}}
         <td class="text-nowrap">
@@ -89,10 +98,16 @@
             <div class="dropdown">
               <button class="btn btn-sm btn-icon" data-bs-toggle="dropdown" aria-expanded="false" aria-label="更多操作">{{icon "dots-vertical"}}</button>
               <div class="dropdown-menu dropdown-menu-end">
+                {{if eq .Status "paused"}}
+                <h6 class="dropdown-header">{{.Detail}}</h6>
+                <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/resume"><input type="hidden" name="csrf" value="{{$p.CSRF}}">
+                  <button class="dropdown-item">{{icon "player-play"}}取消暂停，马上放回名单</button></form>
+                {{else}}
                 <h6 class="dropdown-header">暂时拿掉（测试切换用，到时自动回来）</h6>
                 {{range $m := list "30" "120"}}
                 <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/pause"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="minutes" value="{{$m}}">
                   <button class="dropdown-item">{{icon "player-pause"}}暂停 {{if eq $m "30"}}30 分钟{{else}}2 小时{{end}}</button></form>
+                {{end}}
                 {{end}}
                 <div class="dropdown-divider"></div>
                 <form method="post" action="/cluster/{{$c.ID}}/node/{{$n.ID}}/enable"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="enabled" value="{{if $n.Enabled}}0{{else}}1{{end}}">

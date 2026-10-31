@@ -84,8 +84,10 @@ func handleTokenRequest(c net.Conn, ip string, first []byte) {
 		!ipWindow.allow(ip, *ipTokenLimit, now) ||
 		!devWindow.allow(id, *devTokenLimit, now) ||
 		isBanned(id) {
+		stats.refuse("token_refused")
 		return
 	}
+	stats.tokens.Add(1)
 	body, _ := json.Marshal(struct {
 		Token     string `json:"token"`
 		ExpiresAt int64  `json:"expires_at"`

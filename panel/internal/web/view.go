@@ -84,7 +84,7 @@ var actionWords = map[string]string{
 	"csrf-rejected": "拒绝了来路不明的请求", "forbidden": "没有权限的操作", "start": "面板启动",
 	"unseal": "解锁保险库", "cluster-create": "创建渠道", "cluster-edit": "修改渠道设置",
 	"node-add": "加入节点", "node-edit": "修改节点", "node-delete": "删除节点", "node-enable": "启用/停用节点",
-	"node-pause": "暂停节点", "node-install-script": "生成节点安装脚本", "auto-publish": "开关自动维护",
+	"node-pause": "暂停节点", "node-resume": "取消暂停", "node-install-script": "生成节点安装脚本", "auto-publish": "开关自动维护",
 	"seal-list": "开关加密名单", "publish": "更新名单", "target-add": "加入域名", "target-edit": "修改域名",
 	"target-delete": "移除域名", "secret-set": "保存授权", "secret-test": "测试授权",
 	"hostkey-trust": "确认服务器指纹", "ssh-settings": "修改远程登录设置", "ssh-check": "查看节点状态",

@@ -155,7 +155,7 @@ func readFrameInner(c net.Conn) ([]byte, error) {
 		return nil, err
 	}
 	n := binary.BigEndian.Uint16(h[:])
-	if n == 0 || n > 4096 {
+	if n == 0 || n > 16384 {
 		return nil, fmt.Errorf("bad frame length %d", n)
 	}
 	body := make([]byte, n)

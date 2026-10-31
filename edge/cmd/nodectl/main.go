@@ -30,7 +30,7 @@ import (
 	"time"
 )
 
-const version = "1"
+const version = "2"
 
 var (
 	unitRe = regexp.MustCompile(`^gamec-edge[a-z0-9-]{0,40}$`)
@@ -185,6 +185,12 @@ func (e *env) control(unit, verb string) error {
 		return fmt.Errorf("%s did not become active after %s", unit, verb)
 	}
 	return nil
+}
+
+// cancelRestore drops the timers that stop-for left behind, so a start, stop or restart by hand is the last
+// word: without this a node stopped by hand would still be started again when such a timer fires.
+func (e *env) cancelRestore(unit string) {
+	e.run("systemctl", "stop", unit+"-restore-*.timer")
 }
 
 func (e *env) stopFor(unit string, seconds int) error {
@@ -357,6 +363,7 @@ func (e *env) dispatch(args []string) (int, error) {
 		}
 		return 0, nil
 	case "start", "stop", "restart":
+		e.cancelRestore(*unit)
 		if err := e.control(*unit, cmd); err != nil {
 			return 1, err
 		}

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/hmac"
@@ -24,7 +25,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"gamec/edge/shieldclient"
 )
 
 var (
@@ -104,20 +108,21 @@ func MakeToken(secret, uid string, now time.Time) string {
 	return body + "." + hex.EncodeToString(m.Sum(nil))
 }
 
-func checkToken(tok string, now time.Time) bool {
+// checkToken reports whether tok is valid now, and the device id it was issued to.
+func checkToken(tok string, now time.Time) (string, bool) {
 	p := strings.Split(tok, ".")
 	if len(p) != 3 {
-		return false
+		return "", false
 	}
 	ts, err := strconv.ParseInt(p[1], 10, 64)
 	if err != nil {
-		return false
+		return "", false
 	}
 	if d := now.Sub(time.Unix(ts, 0)); d > *tokenTTL || d < -*tokenTTL {
-		return false
+		return "", false
 	}
 	want := MakeToken(*secret, p[0], time.Unix(ts, 0))
-	return hmac.Equal([]byte(want), []byte(tok))
+	return p[0], hmac.Equal([]byte(want), []byte(tok))
 }
 
 func selfSigned() tls.Certificate {
@@ -139,6 +144,7 @@ func handle(c net.Conn, lim *limiter) {
 	addr, _, _ := net.SplitHostPort(c.RemoteAddr().String())
 	ip := limitKey(addr)
 	if !lim.acquire(ip) {
+		stats.refuse("per_ip")
 		return
 	}
 	defer lim.release(ip)
@@ -147,21 +153,30 @@ func handle(c net.Conn, lim *limiter) {
 	c.SetReadDeadline(time.Now().Add(5 * time.Second))
 	var hdr [2]byte
 	if _, err := io.ReadFull(c, hdr[:]); err != nil {
+		stats.refuse("no_frame")
 		return
 	}
 	n := binary.BigEndian.Uint16(hdr[:])
 	if n == 0 || n > 256 {
+		stats.refuse("no_frame")
 		return
 	}
 	buf := make([]byte, n)
 	if _, err := io.ReadFull(c, buf); err != nil {
+		stats.refuse("no_frame")
 		return
 	}
 	if isTokenRequest(buf) {
 		handleTokenRequest(c, ip, buf)
 		return
 	}
-	if !checkToken(string(buf), time.Now()) {
+	if isStatsRequest(buf) {
+		handleStatsRequest(c, buf)
+		return
+	}
+	device, ok := checkToken(string(buf), time.Now())
+	if !ok {
+		stats.refuse("bad_token")
 		log.Printf("reject %s: bad token", addr)
 		return
 	}
@@ -169,11 +184,17 @@ func handle(c net.Conn, lim *limiter) {
 
 	up, err := net.DialTimeout("tcp", *origin, 3*time.Second)
 	if err != nil {
+		stats.refuse("origin")
 		log.Printf("origin dial: %v", err)
 		return
 	}
 	defer up.Close()
-	relay(c, up, *idle)
+	defer stats.relayOpened(ip, device)()
+	relay(countingConn{c, &stats.bytesUp}, countingConn{up, &stats.bytesDown}, *idle)
+}
+
+func isStatsRequest(first []byte) bool {
+	return bytes.HasPrefix(first, []byte(shieldclient.StatsRequestPrefix))
 }
 
 // relay copies both ways until both are done. A side that finishes sending is half-closed towards the other,
@@ -224,13 +245,16 @@ func relay(client, up net.Conn, idle time.Duration) {
 	<-done
 	// One side has finished sending. Many servers never close their side in answer, so the rest only gets
 	// a short while, whatever the idle timeout, before both are closed.
-	t := time.AfterFunc(halfCloseGrace, func() { client.Close(); up.Close() })
+	t := time.AfterFunc(time.Duration(halfCloseGrace.Load()), func() { client.Close(); up.Close() })
 	<-done
 	t.Stop()
 }
 
 // halfCloseGrace is how long a relay stays open after one side finished sending, for the reply in flight.
-var halfCloseGrace = 30 * time.Second
+// Atomic only so that tests can shorten it while relays of earlier tests are still finishing.
+var halfCloseGrace atomic.Int64
+
+func init() { halfCloseGrace.Store(int64(30 * time.Second)) }
 
 func main() {
 	flag.Parse()
@@ -279,6 +303,7 @@ func main() {
 		select {
 		case slots <- struct{}{}:
 		default:
+			stats.refuse("full")
 			c.Close() // full: refuse at once rather than queue
 			continue
 		}

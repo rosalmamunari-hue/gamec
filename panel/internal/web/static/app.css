@@ -55,3 +55,9 @@ pre.script { max-height: 28rem; overflow: auto; font-size: .78rem; }
 .empty-sm { padding: 2rem 1rem; }
 .form-hint code { font-size: .75rem; }
 .page-auth { min-height: 100vh; }
+
+/* connection numbers */
+.traffic-sum { display: flex; flex-wrap: wrap; gap: .25rem 1.25rem; align-items: center; }
+.traffic-sum .icon { margin-right: .25rem; color: var(--tblr-secondary); }
+.spark { display: block; width: 100%; height: 3rem; margin-top: .25rem; overflow: visible; }
+.spark polyline { fill: none; stroke: var(--tblr-primary); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; }

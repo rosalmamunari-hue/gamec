@@ -125,6 +125,7 @@ func (s *Server) RunBackground(ctx context.Context) {
 			lastOrigin = time.Now()
 		}
 		s.checkAlerts(ctx)
+		s.PollTraffic(ctx)
 		select {
 		case <-ctx.Done():
 			return

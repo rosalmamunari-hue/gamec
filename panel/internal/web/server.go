@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"gamec/edge/shieldclient"
 	"gamec/edge/shieldlist"
 	"gamec/panel/internal/audit"
 	"gamec/panel/internal/auth"
@@ -71,6 +72,8 @@ type Server struct {
 	Alerter  *notify.Alerter
 	// DialOrigin connects to an origin to see whether it is open to the internet; nil means directly.
 	DialOrigin dialOriginFunc
+	// FetchStats asks a node for its connection numbers; nil means over the network (see traffic.go).
+	FetchStats func(n *store.Node, secret string) (*shieldclient.NodeStats, error)
 
 	tpl       *template.Template
 	lim       *limiter
@@ -78,6 +81,7 @@ type Server struct {
 	origins   originChecks
 	latest    latestCache
 	alertOnce sync.Once
+	traffic   trafficBook
 }
 
 const cookieName = "gc_session"
@@ -114,6 +118,7 @@ func (s *Server) init() {
 			"providerName": providerName,
 			"daysLeft":     func(exp int64) int { return daysLeft(s.now(), exp) },
 			"dict":         dict,
+			"pct":          func(a, b int) int { return a * 100 / max(b, 1) },
 		}
 		s.tpl = template.Must(template.New("").Funcs(funcs).ParseFS(assets, "templates/*.html"))
 		s.lim = newLimiter(10, 10*time.Minute)
@@ -351,6 +356,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /cluster/{id}/node", s.need(true, s.nodeAdd))
 	mux.HandleFunc("POST /cluster/{id}/node/{nid}/enable", s.need(true, s.nodeEnable))
 	mux.HandleFunc("POST /cluster/{id}/node/{nid}/pause", s.need(true, s.nodePause))
+	mux.HandleFunc("POST /cluster/{id}/node/{nid}/resume", s.need(true, s.nodeResume))
+	mux.HandleFunc("POST /cluster/{id}/node/{nid}/traffic", s.need(false, s.trafficNow))
 	mux.HandleFunc("POST /cluster/{id}/node/{nid}/delete", s.need(true, s.nodeDelete))
 	mux.HandleFunc("POST /cluster/{id}/probe", s.need(true, s.probeNow))
 	mux.HandleFunc("POST /cluster/{id}/publish", s.need(true, s.publishNow))
@@ -433,6 +440,7 @@ func safe(s string) string {
 
 type nodeView struct {
 	N       *store.Node
+	T       trafficView // connection numbers the node reported
 	Status  string // ok | fail | ejected | paused | off | unknown
 	Detail  string
 	Latency string
@@ -449,7 +457,7 @@ func (s *Server) nodeViews(st store.State, c *store.Cluster) []nodeView {
 	now := s.now()
 	var out []nodeView
 	for _, n := range st.NodesOf(c.ID) {
-		v := nodeView{N: n}
+		v := nodeView{N: n, T: s.trafficView(n)}
 		h := s.Mon.Health(n.ID)
 		switch {
 		case !n.Enabled:
@@ -506,10 +514,13 @@ type clusterRow struct {
 	// affected or soon will be) or setup (not finished yet). Headline says it in a sentence.
 	Level    string
 	Headline string
+
+	Traffic clusterTraffic
 }
 
 func (s *Server) clusterRow(st store.State, c *store.Cluster) clusterRow {
 	row := clusterRow{C: c, Nodes: s.nodeViews(st, c), Note: s.Sched.Note(c.ID)}
+	row.Traffic = s.clusterTraffic(row.Nodes)
 	for _, n := range row.Nodes {
 		row.All++
 		if n.Status == "ok" {
@@ -781,6 +792,12 @@ func (s *Server) nodePause(w http.ResponseWriter, r *http.Request, _ *auth.Sessi
 	s.mutateNode(w, r, "node-pause", func(n *store.Node) error { n.DisabledUntil = until; return nil })
 }
 
+// nodeResume ends a pause at once; the next round of automatic publishing (within half a minute) puts the
+// node back in the list.
+func (s *Server) nodeResume(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
+	s.mutateNode(w, r, "node-resume", func(n *store.Node) error { n.DisabledUntil = time.Time{}; return nil })
+}
+
 func (s *Server) nodeDelete(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
 	id, nid := r.PathValue("id"), r.PathValue("nid")
 	var label string
@@ -789,6 +806,7 @@ func (s *Server) nodeDelete(w http.ResponseWriter, r *http.Request, _ *auth.Sess
 			if n.ID == nid && n.ClusterID == id {
 				label = n.Addr()
 				st.Nodes = append(st.Nodes[:i], st.Nodes[i+1:]...)
+				s.traffic.forget(nid)
 				return nil
 			}
 		}
