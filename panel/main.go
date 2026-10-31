@@ -488,6 +488,7 @@ func cmdServe(args []string) error {
 	srv := &web.Server{Users: users, Sessions: auth.NewSessions(30*time.Minute, 12*time.Hour), Vault: v, Store: st,
 		Audit: al, AuditPath: p.audit, Mon: mon, Pub: pub, Sched: sched, Secure: *secure, TrustProxy: *trustProxy,
 		Ops: nodeOps, Egress: eg, ReleaseBase: *releaseBase}
+	go srv.RunBackground(ctx)
 	hs := &http.Server{Addr: *listen, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout: 30 * time.Second, WriteTimeout: 10 * time.Minute, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 16 << 10}
 	go func() {

@@ -1,0 +1,120 @@
+{{template "head" .}}
+{{$p := .}}
+{{$d := .Data}}
+<div class="row row-cards">
+<div class="col-lg-7">
+
+<div class="card mb-3">
+  <div class="card-header"><h3 class="card-title">发到哪里</h3>
+    {{if $d.To}}<div class="card-actions"><form method="post" action="/alerts/test"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button class="btn btn-sm" data-busy="发送中…">{{icon "bell"}}发一条测试消息</button></form></div>{{end}}</div>
+  {{if $d.To}}
+  <div class="list-group list-group-flush">
+    {{range $i, $t := $d.To}}
+    <div class="list-group-item d-flex align-items-center gap-2">
+      <span class="avatar avatar-sm bg-primary-lt">{{if eq $t.Kind "telegram"}}{{icon "brand-telegram"}}{{else}}{{icon "webhook"}}{{end}}</span>
+      <div class="flex-fill">{{$t.Label}}</div>
+      <form method="post" action="/alerts/{{$i}}/delete" data-confirm="以后不再把告警发到「{{$t.Label}}」。" data-confirm-ok="删除">
+        <input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="label" value="{{$t.Label}}">
+        <button class="btn btn-sm btn-icon btn-ghost-danger" aria-label="删除">{{icon "trash"}}</button></form>
+    </div>
+    {{end}}
+  </div>
+  {{else}}
+  <div class="card-body"><div class="alert alert-warning mb-0">{{icon "alert-triangle"}} 还没有设置。现在出了问题只能靠你自己上来看。在下面加一个吧。</div></div>
+  {{end}}
+</div>
+
+<div class="card mb-3">
+  <div class="card-header">
+    <ul class="nav nav-tabs card-header-tabs" data-bs-toggle="tabs" role="tablist">
+      <li class="nav-item" role="presentation"><a href="#tab-robot" class="nav-link{{if eq $d.Kind "robot"}} active{{end}}" data-bs-toggle="tab" role="tab">{{icon "webhook"}}&nbsp;飞书 / 钉钉 / 企业微信</a></li>
+      <li class="nav-item" role="presentation"><a href="#tab-telegram" class="nav-link{{if eq $d.Kind "telegram"}} active{{end}}" data-bs-toggle="tab" role="tab">{{icon "brand-telegram"}}&nbsp;Telegram</a></li>
+    </ul>
+  </div>
+  <div class="card-body">
+    <div class="tab-content">
+      <div class="tab-pane{{if eq $d.Kind "robot"}} active show{{end}}" id="tab-robot" role="tabpanel">
+        <p class="text-secondary">最简单：在你们的工作群里加一个「群机器人」，把它的网址贴过来就行。</p>
+        <ol class="text-secondary small">
+          <li><b>飞书</b>：群设置 → 群机器人 → 添加机器人 → 自定义机器人 → 复制「Webhook 地址」。</li>
+          <li><b>钉钉</b>：群设置 → 机器人 → 添加机器人 → 自定义 → 安全设置选「自定义关键词」，填 <code>告警</code> → 复制 Webhook。</li>
+          <li><b>企业微信</b>：群聊右上角 → 添加群机器人 → 新创建一个机器人 → 复制 Webhook 地址。</li>
+        </ol>
+        <form method="post" action="/alerts/add">
+          <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+          <div class="mb-3"><label class="form-label" for="r-kind">哪一家</label>
+            <select class="form-select" id="r-kind" name="kind">
+              <option value="feishu">飞书</option><option value="dingtalk">钉钉</option><option value="wecom">企业微信</option><option value="json">其他（收 JSON 的网址）</option>
+            </select></div>
+          <div class="mb-3"><label class="form-label" for="r-url">机器人的 Webhook 地址</label><input class="form-control mono" id="r-url" name="url" placeholder="https://..." required></div>
+          <button class="btn btn-primary" data-busy="发送测试消息中…">{{icon "plus"}}添加，并发一条测试消息</button>
+        </form>
+      </div>
+      <div class="tab-pane{{if eq $d.Kind "telegram"}} active show{{end}}" id="tab-telegram" role="tabpanel">
+        <ol class="text-secondary small">
+          <li>在 Telegram 里找 <b>@BotFather</b>，发 <code>/newbot</code>，按提示起个名字，它会给你一串<b>令牌</b>。</li>
+          <li>给你的新机器人随便发一句话（要发到群里的话，把它拉进群，在群里发一句）。</li>
+          <li>把令牌贴到下面，点「找我的聊天」。</li>
+        </ol>
+        {{if $d.Chats}}
+        <form method="post" action="/alerts/add">
+          <input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="kind" value="telegram"><input type="hidden" name="token" value="{{$d.Token}}">
+          <div class="form-label">发到哪个聊天</div>
+          <div class="mb-3">
+            {{range $i, $c := $d.Chats}}
+            <label class="form-check"><input class="form-check-input" type="radio" name="chat_id" value="{{$c.ID}}"{{if eq $i 0}} checked{{end}}><span class="form-check-label">{{$c.Title}} <span class="text-secondary mono">{{$c.ID}}</span></span></label>
+            {{end}}
+          </div>
+          <button class="btn btn-primary" data-busy="发送测试消息中…">{{icon "plus"}}添加，并发一条测试消息</button>
+        </form>
+        {{else}}
+        <form method="post" action="/alerts/chats">
+          <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+          <div class="mb-3"><label class="form-label" for="t-token">机器人令牌</label><input class="form-control mono" id="t-token" name="token" value="{{$d.Token}}" placeholder="123456789:AAH..." autocomplete="off" required></div>
+          <button class="btn btn-primary" data-busy="询问 Telegram 中…">找我的聊天{{icon "arrow-right"}}</button>
+        </form>
+        {{end}}
+      </div>
+    </div>
+  </div>
+  <div class="card-footer text-secondary small">{{icon "info-circle"}} 这些设置存在面板服务器的设置文件里，<b>不在保险库里</b>：保险库上锁时正是最需要发告警的时候。所以只用专门建的机器人，别用你的个人账号。</div>
+</div>
+</div>
+
+<div class="col-lg-5">
+<div class="card mb-3">
+  <div class="card-header"><h3 class="card-title">会提醒你的情况</h3></div>
+  <div class="card-body">
+    <ul class="mb-3">
+      <li><span class="text-danger">严重</span>：保险库上锁超过 3 分钟（面板重启后没人解锁）</li>
+      <li><span class="text-danger">严重</span>：名单过期，或快到期但自动续期没在运行</li>
+      <li><span class="text-danger">严重</span>：一个渠道里没有任何节点正常</li>
+      <li><span class="text-danger">严重</span>：自动更新名单一直失败</li>
+      <li><span class="text-warning">留意</span>：某个节点连续 5 分钟检查失败</li>
+      <li><span class="text-warning">留意</span>：源站对公网开放</li>
+    </ul>
+    <p class="text-secondary small">问题解决后会再发一条「已恢复」。</p>
+    <form method="post" action="/alerts/settings" class="d-flex gap-2 align-items-end">
+      <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+      <div class="flex-fill"><label class="form-label" for="a-remind">问题一直没解决，每隔几小时再提醒一次</label>
+        <input class="form-control" id="a-remind" name="remind_hours" type="number" min="0" max="168" value="{{$d.RemindHours}}"><div class="form-hint">填 0 就是只提醒一次。</div></div>
+      <button class="btn mb-4">保存</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><h3 class="card-title">现在的问题</h3></div>
+  {{if $d.Open}}
+  <div class="list-group list-group-flush">{{range $d.Open}}<div class="list-group-item small"><span class="{{if .Bad}}text-danger{{else}}text-warning{{end}}">{{icon "alert-circle"}}</span> {{.Text}}</div>{{end}}</div>
+  {{else}}<div class="card-body text-success">{{icon "circle-check"}} 没有。</div>{{end}}
+  <div class="card-header border-top"><h3 class="card-title">最近发出的告警</h3></div>
+  {{if $d.Recent}}
+  <div class="list-group list-group-flush">
+    {{range $d.Recent}}<div class="list-group-item small"><div class="text-secondary">{{ts .At}}{{if .Err}} · <span class="text-danger">没发出去：{{.Err}}</span>{{end}}</div>{{.Text}}</div>{{end}}
+  </div>
+  {{else}}<div class="card-body text-secondary small">面板这次启动后还没发过。</div>{{end}}
+</div>
+</div>
+</div>
+{{template "foot" .}}

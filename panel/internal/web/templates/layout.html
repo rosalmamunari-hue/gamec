@@ -73,6 +73,7 @@
 <div class="page page-center page-auth">
   <div class="container container-tight py-4">
     <div class="text-center mb-4"><span class="brand-mark">{{icon "shield-lock"}}</span><span class="h2 align-middle">gamec 面板</span></div>
+    {{if .Flash}}<div class="alert alert-success" role="status">{{icon "circle-check"}} <span data-msg>{{.Flash}}</span></div>{{end}}
     {{if .Error}}<div class="alert alert-danger" role="alert">{{icon "alert-circle"}} <span data-msg>{{.Error}}</span></div>{{end}}
 {{end}}
 {{end}}

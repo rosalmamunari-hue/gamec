@@ -320,6 +320,19 @@ func (u *Users) SetPassword(name, password string) error {
 	return u.save()
 }
 
+// ChangePassword sets a new password after checking the current password and a fresh code, the same way a
+// login does (a wrong guess counts towards the lockout), so a session left open is not enough to take over
+// the account.
+func (u *Users) ChangePassword(name, current, code, next string, now time.Time) error {
+	if len(next) < MinPassword {
+		return fmt.Errorf("password must be at least %d characters", MinPassword)
+	}
+	if _, err := u.Authenticate(name, current, code, now); err != nil {
+		return err
+	}
+	return u.SetPassword(name, next)
+}
+
 func (u *Users) Delete(name string) error {
 	u.mu.Lock()
 	defer u.mu.Unlock()

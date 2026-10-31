@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gamec/panel/internal/engine"
+	"gamec/panel/internal/notify"
 	"gamec/panel/internal/store"
 )
 
@@ -57,6 +58,12 @@ func TestDemoServer(t *testing.T) {
 	e.s.origins.res = map[string]originResult{official.ID: {At: time.Now(), Err: "连接超时（被防火墙挡住了）"}}
 
 	e.seedCluster("测试渠道")
+	e.st.Mutate(func(st *store.State) error {
+		st.Alerts = &store.Alerts{RemindHours: 6, To: []notify.Destination{{Kind: "feishu", URL: "https://open.feishu.cn/open-apis/bot/v2/hook/demo"}}}
+		return nil
+	})
+	e.s.alerter().Update(time.Now().Add(-10*time.Minute), e.s.alertConditions())
+	e.s.alerter().Record(notify.Sent{At: time.Now().Add(-4 * time.Minute), Text: "🟡 渠道「官服」的节点 sg-1（203.0.113.13:23198）连续 6 次检查失败，已从名单拿掉：连接超时"})
 
 	if p := os.Getenv("GAMEC_DEMO_COOKIE"); p != "" {
 		u, _ := url.Parse(e.ts.URL)

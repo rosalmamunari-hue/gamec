@@ -45,6 +45,13 @@ pre.script { max-height: 28rem; overflow: auto; font-size: .78rem; }
 .addr-big { font-family: var(--tblr-font-monospace); font-size: 1.25rem; font-weight: 600; }
 .nav-section { font-size: .6875rem; text-transform: uppercase; letter-spacing: .04em; color: var(--tblr-secondary); padding: 1rem 1rem .25rem; }
 .table td { vertical-align: middle; }
+.card-header { flex-wrap: wrap; gap: .5rem; }
+.card-header .card-actions { margin-left: auto; }
+.accordion-button { font-size: .875rem; }
+@media (max-width: 767.98px) {
+  .page-title { font-size: 1.25rem; }
+  .health { flex-direction: column; }
+}
 .empty-sm { padding: 2rem 1rem; }
 .form-hint code { font-size: .75rem; }
 .page-auth { min-height: 100vh; }

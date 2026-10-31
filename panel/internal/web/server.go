@@ -25,6 +25,7 @@ import (
 	"gamec/panel/internal/auth"
 	"gamec/panel/internal/egress"
 	"gamec/panel/internal/engine"
+	"gamec/panel/internal/notify"
 	"gamec/panel/internal/ops"
 	"gamec/panel/internal/store"
 	"gamec/panel/internal/vault"
@@ -65,14 +66,18 @@ type Server struct {
 
 	// FetchPin reads the TLS pin a node presents (for the add-a-node wizard); nil means connect to it.
 	FetchPin func(addr string, timeout time.Duration) (string, error)
+	// Notifier sends alerts and Alerter decides when; nil means the defaults.
+	Notifier *notify.Sender
+	Alerter  *notify.Alerter
 	// DialOrigin connects to an origin to see whether it is open to the internet; nil means directly.
 	DialOrigin dialOriginFunc
 
-	tpl     *template.Template
-	lim     *limiter
-	once    sync.Once
-	origins originChecks
-	latest  latestCache
+	tpl       *template.Template
+	lim       *limiter
+	once      sync.Once
+	origins   originChecks
+	latest    latestCache
+	alertOnce sync.Once
 }
 
 const cookieName = "gc_session"
@@ -364,6 +369,8 @@ func (s *Server) Handler() http.Handler {
 	s.routesSSH(mux)
 	s.routesEdit(mux)
 	s.routesWizard(mux)
+	s.routesAlerts(mux)
+	s.routesAccount(mux)
 	s.routesEgress(mux)
 	return s.headers(mux)
 }
@@ -371,7 +378,7 @@ func (s *Server) Handler() http.Handler {
 // ---------------------------------------------------------------- login / logout
 
 func (s *Server) loginForm(w http.ResponseWriter, r *http.Request) {
-	s.render(w, r, "login.html", page{Title: "登录"}, http.StatusOK)
+	s.render(w, r, "login.html", page{Title: "登录", Flash: r.URL.Query().Get("ok")}, http.StatusOK)
 }
 
 func (s *Server) loginSubmit(w http.ResponseWriter, r *http.Request) {
@@ -651,25 +658,20 @@ func (s *Server) clusterCreate(w http.ResponseWriter, r *http.Request, _ *auth.S
 		fail("有效期与续期天数必须是数字。")
 		return
 	}
-	provider := r.FormValue("provider")
-	zone := strings.ToLower(strings.TrimSpace(r.FormValue("zone")))
-	dnsName := strings.ToLower(strings.TrimSpace(r.FormValue("dns_name")))
-	credRef := strings.TrimSpace(r.FormValue("cred_ref"))
-	if provider != "manual" && credRef == "" {
-		credRef = "main"
+	origin := strings.TrimSpace(r.FormValue("origin"))
+	if err := validOrigin(origin); err != nil {
+		fail(err.Error())
+		return
 	}
-	if provider == "cloudflare" && zone == "" {
-		z, zerr := s.detectZone(r.Context(), credRef, dnsName)
-		if zerr != nil {
-			fail(zerr.Error())
-			return
-		}
-		zone = z
+	target, err := s.targetFromForm(r)
+	if err != nil {
+		fail(err.Error())
+		return
 	}
 	c := &store.Cluster{
-		ID: store.NewID(), Name: name, Origin: strings.TrimSpace(r.FormValue("origin")),
+		ID: store.NewID(), Name: name, Origin: origin,
 		ValidDays: valid, RenewBeforeDays: renew, Created: s.now(),
-		Targets: []store.DNSTarget{{Provider: provider, Zone: zone, Name: dnsName, CredRef: credRef}},
+		Targets: []store.DNSTarget{target},
 	}
 	key, err := shieldlist.GenerateKey()
 	if err != nil {
@@ -681,7 +683,7 @@ func (s *Server) clusterCreate(w http.ResponseWriter, r *http.Request, _ *auth.S
 	secret := newSecret()
 
 	if err := s.Store.Mutate(func(st *store.State) error { st.Clusters = append(st.Clusters, c); return nil }); err != nil {
-		fail(err.Error())
+		fail(friendlyStoreError(err))
 		return
 	}
 	if err := s.Vault.Set(engine.SigningKeyName(c.ID), enc); err == nil {

@@ -1,0 +1,81 @@
+{{template "head" .}}
+{{$p := .}}
+{{$d := .Data}}
+{{if $d.New}}
+<div class="card mb-3">
+  <div class="card-status-top bg-success"></div>
+  <div class="card-body">
+    <h3>新账号「{{$d.New}}」：现在让对方用手机扫这个码</h3>
+    <div class="row g-3 align-items-center">
+      {{if $d.NewQR}}<div class="col-auto"><img src="{{$d.NewQR}}" alt="验证器二维码" width="240" height="240" class="border rounded"></div>{{end}}
+      <div class="col">
+        <ol>
+          <li>手机上装一个验证器 App（Google Authenticator、Microsoft Authenticator 都行）。</li>
+          <li>在 App 里点「+」→「扫描二维码」，扫左边的码。</li>
+          <li>以后登录时，输入 App 里这个账号显示的 6 位数字。</li>
+        </ol>
+        <div class="form-label">扫不了的话，手动输入这串密钥</div>
+        <div class="copy-row"><div class="form-control secret-box" id="totp-key">{{$d.NewKey}}</div><button type="button" class="btn" data-copy="#totp-key">{{icon "copy"}}<span>复制</span></button></div>
+        <div class="text-danger small mt-2">{{icon "alert-triangle"}} 这个码只显示这一次。离开这页之后就看不到了，丢了只能删掉账号重新加。</div>
+      </div>
+    </div>
+  </div>
+</div>
+{{end}}
+
+<div class="row row-cards">
+<div class="col-lg-5">
+<form method="post" action="/account/password" class="card">
+  <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+  <div class="card-header"><h3 class="card-title">修改我的密码（{{$d.Me}}）</h3></div>
+  <div class="card-body">
+    <div class="mb-3"><label class="form-label" for="pw-cur">现在的密码</label><input class="form-control" id="pw-cur" name="current" type="password" autocomplete="current-password" required></div>
+    <div class="mb-3"><label class="form-label" for="pw-code">手机验证码</label><input class="form-control" id="pw-code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="6 位数字" required></div>
+    <div class="mb-3"><label class="form-label" for="pw-new">新密码</label><input class="form-control" id="pw-new" name="new" type="password" autocomplete="new-password" minlength="{{$d.MinChars}}" required><div class="form-hint">至少 {{$d.MinChars}} 个字符。用一句好记的长句子比乱码更安全。</div></div>
+    <div class="mb-3"><label class="form-label" for="pw-again">再输一次新密码</label><input class="form-control" id="pw-again" name="again" type="password" autocomplete="new-password" required></div>
+  </div>
+  <div class="card-footer"><button class="btn btn-primary w-100" data-busy="修改中…">修改密码</button>
+    <div class="text-secondary small mt-2">改完后所有登录的地方都会退出，用新密码重新登录。</div></div>
+</form>
+</div>
+
+{{if $p.Admin}}
+<div class="col-lg-7">
+<div class="card mb-3">
+  <div class="card-header"><h3 class="card-title">所有账号</h3></div>
+  <div class="table-responsive">
+  <table class="table table-vcenter card-table">
+    <thead><tr><th>账号</th><th>权限</th><th>状态</th><th>添加时间</th><th class="w-1"></th></tr></thead>
+    <tbody>
+    {{range $d.Users}}
+    <tr>
+      <td><b>{{.Name}}</b>{{if eq .Name $d.Me}} <span class="badge bg-primary-lt">我</span>{{end}}</td>
+      <td>{{if eq .Role "admin"}}管理员{{else}}只读{{end}}</td>
+      <td>{{if .Locked}}<span class="status status-red"><span class="status-dot"></span>输错太多次，暂时锁定</span>{{else}}<span class="status status-green"><span class="status-dot"></span>正常</span>{{end}}</td>
+      <td class="text-secondary small">{{ts .Created}}</td>
+      <td>{{if ne .Name $d.Me}}<form method="post" action="/account/users/delete" data-confirm="删除账号「{{.Name}}」。它已经登录的地方会马上退出。" data-confirm-ok="删除">
+        <input type="hidden" name="csrf" value="{{$p.CSRF}}"><input type="hidden" name="name" value="{{.Name}}"><button class="btn btn-sm btn-icon btn-ghost-danger" aria-label="删除">{{icon "trash"}}</button></form>{{end}}</td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+  </div>
+</div>
+<form method="post" action="/account/users" class="card">
+  <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+  <div class="card-header"><h3 class="card-title">加一个账号</h3></div>
+  <div class="card-body">
+    <div class="row">
+      <div class="col-md-6 mb-3"><label class="form-label" for="u-name">账号名</label><input class="form-control" id="u-name" name="name" autocomplete="off" required></div>
+      <div class="col-md-6 mb-3"><label class="form-label" for="u-role">权限</label>
+        <select class="form-select" id="u-role" name="role"><option value="viewer">只读：只能看，不能改</option><option value="admin">管理员：什么都能做</option></select></div>
+    </div>
+    <div class="mb-3"><label class="form-label" for="u-pw">初始密码</label><input class="form-control" id="u-pw" name="password" type="password" autocomplete="new-password" minlength="{{$d.MinChars}}" required>
+      <div class="form-hint">至少 {{$d.MinChars}} 个字符。私下告诉对方，让对方登录后自己改掉。</div></div>
+  </div>
+  <div class="card-footer text-end"><button class="btn btn-primary">{{icon "plus"}}添加，并显示验证器二维码</button></div>
+</form>
+</div>
+{{end}}
+</div>
+{{template "foot" .}}

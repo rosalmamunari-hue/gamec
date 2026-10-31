@@ -281,7 +281,7 @@ func TestSessionExpiresWhenIdle(t *testing.T) {
 func TestSecurityHeadersOnEveryResponse(t *testing.T) {
 	e := newEnv(t, true)
 	c := e.client()
-	for _, p := range []string{"/login", "/", "/static/style.css", "/nope"} {
+	for _, p := range []string{"/login", "/", "/static/app.css", "/nope"} {
 		_, _, h := c.get(p)
 		csp := h.Get("Content-Security-Policy")
 		if !strings.Contains(csp, "default-src 'none'") || !strings.Contains(csp, "frame-ancestors 'none'") || strings.Contains(csp, "unsafe-inline") {
@@ -302,7 +302,7 @@ func TestPagesUseNoInlineScriptOrStyle(t *testing.T) {
 	c.post("/cluster/"+cl.ID+"/node", url.Values{"csrf": {c.csrf()}, "name": {"hk"}, "host": {"1.2.3.4"}, "port": {"30800"}, "pin": {pin}}, nil)
 	nid := e.st.Snapshot().NodesOf(cl.ID)[0].ID
 	scriptTag := regexp.MustCompile(`<script[^>]*>`)
-	for _, p := range []string{"/login", "/", "/cluster/new", "/cluster/" + cl.ID, "/cluster/" + cl.ID + "/node/" + nid, "/secrets", "/unseal", "/audit"} {
+	for _, p := range []string{"/login", "/", "/cluster/new", "/cluster/" + cl.ID, "/cluster/" + cl.ID + "/node/" + nid, "/cluster/" + cl.ID + "/node/new", "/secrets", "/unseal", "/audit", "/alerts", "/account", "/ssh", "/egress"} {
 		_, body, _ := c.get(p)
 		low := strings.ToLower(body)
 		for _, bad := range []string{"style=", "onclick=", "onload=", "onsubmit=", "javascript:"} {

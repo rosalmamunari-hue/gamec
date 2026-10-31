@@ -70,16 +70,18 @@
   {{if $row.Nodes}}
   <div class="table-responsive">
     <table class="table table-vcenter card-table">
-      <thead><tr><th>状态</th><th>名称</th><th>地址</th><th>连接耗时</th><th>说明</th>{{if $p.Admin}}<th class="w-1"></th>{{end}}</tr></thead>
+      <thead><tr><th>状态</th><th>名称</th><th class="d-none d-md-table-cell">地址</th><th class="d-none d-md-table-cell">连接耗时</th><th class="d-none d-lg-table-cell">说明</th>{{if $p.Admin}}<th class="w-1"></th>{{end}}</tr></thead>
       <tbody>
       {{range $row.Nodes}}
       {{$n := .N}}
       <tr>
         <td class="text-nowrap">{{template "status" .}}</td>
-        <td><a href="/cluster/{{$c.ID}}/node/{{$n.ID}}" class="text-reset fw-bold">{{$n.Name}}</a></td>
-        <td class="mono">{{$n.Host}}:{{$n.Port}}</td>
-        <td class="text-secondary">{{if .Latency}}{{.Latency}}{{else}}—{{end}}</td>
-        <td class="text-secondary small">{{if ne .Status "ok"}}{{.Detail}}{{else if not .Checked.IsZero}}{{clock .Checked}} 检查过{{end}}</td>
+        <td><a href="/cluster/{{$c.ID}}/node/{{$n.ID}}" class="text-reset fw-bold">{{$n.Name}}</a>
+          <div class="d-md-none mono small text-secondary">{{$n.Host}}:{{$n.Port}}</div>
+          {{if ne .Status "ok"}}<div class="d-lg-none small text-secondary">{{.Detail}}</div>{{end}}</td>
+        <td class="mono d-none d-md-table-cell">{{$n.Host}}:{{$n.Port}}</td>
+        <td class="text-secondary d-none d-md-table-cell">{{if .Latency}}{{.Latency}}{{else}}—{{end}}</td>
+        <td class="text-secondary small d-none d-lg-table-cell">{{if ne .Status "ok"}}{{.Detail}}{{else if not .Checked.IsZero}}{{clock .Checked}} 检查过{{end}}</td>
         {{if $p.Admin}}
         <td class="text-nowrap">
           <div class="btn-list flex-nowrap">

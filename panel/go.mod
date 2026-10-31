@@ -9,4 +9,6 @@ require (
 	golang.org/x/term v0.27.0
 )
 
+require rsc.io/qr v0.2.0
+
 replace gamec/edge => ../edge

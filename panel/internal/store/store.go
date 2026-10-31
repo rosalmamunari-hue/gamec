@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"gamec/panel/internal/atomicfile"
+	"gamec/panel/internal/notify"
 )
 
 var (
@@ -121,10 +122,18 @@ type Egress struct {
 	HostKey string `json:"host_key"` // confirmed SHA256 fingerprint; empty means not confirmed yet
 }
 
+// Alerts says where to send word when something needs a person. It is kept here and not in the vault on
+// purpose: the most important alert is "the vault is locked", which could not be sent if this were locked too.
+type Alerts struct {
+	To          []notify.Destination `json:"to"`
+	RemindHours int                  `json:"remind_hours"` // repeat an unsolved problem this often; 0 = never
+}
+
 type State struct {
 	Clusters []*Cluster `json:"clusters"`
 	Nodes    []*Node    `json:"nodes"`
 	Egress   *Egress    `json:"egress,omitempty"`
+	Alerts   *Alerts    `json:"alerts,omitempty"`
 }
 
 func (s State) Cluster(id string) *Cluster {
@@ -247,6 +256,19 @@ func (s State) Validate() error {
 		}
 		if e.HostKey != "" && !hostKeyRe.MatchString(e.HostKey) {
 			return errors.New("the egress host key fingerprint is not valid")
+		}
+	}
+	if a := s.Alerts; a != nil {
+		if len(a.To) > 10 {
+			return errors.New("at most 10 alert destinations")
+		}
+		for _, d := range a.To {
+			if err := d.Validate(); err != nil {
+				return err
+			}
+		}
+		if a.RemindHours < 0 || a.RemindHours > 168 {
+			return errors.New("reminders must be 0-168 hours apart")
 		}
 	}
 	nodeIDs := map[string]bool{}
