@@ -9,6 +9,8 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"strconv"
+	"strings"
 )
 
 // PROXY protocol version 2 (haproxy.org/download/2.9/doc/proxy-protocol.txt): a binary header at the start of
@@ -70,7 +72,71 @@ func AddrPortOf(a net.Addr) netip.AddrPort {
 	return ap
 }
 
-var ErrNoProxyHeader = errors.New("no PROXY v2 header")
+var ErrNoProxyHeader = errors.New("no PROXY header")
+
+// HasProxy says whether r starts with a PROXY header of either version, waiting for at most the bytes it needs.
+func HasProxy(r *bufio.Reader) (bool, error) {
+	p, err := r.Peek(6)
+	if err != nil {
+		return false, err
+	}
+	if string(p) == "PROXY " {
+		return true, nil
+	}
+	if !bytes.Equal(p, ProxySig[:6]) {
+		return false, nil
+	}
+	return HasProxyV2(r)
+}
+
+// ReadProxy reads one PROXY header of either version.
+func ReadProxy(r *bufio.Reader) (ProxyHeader, error) {
+	if p, err := r.Peek(6); err == nil && string(p) == "PROXY " {
+		return ReadProxyV1(r)
+	}
+	return ReadProxyV2(r)
+}
+
+// ReadProxyV1 reads one PROXY v1 (text) header: at most 107 bytes, ending in CRLF. "PROXY UNKNOWN" counts as
+// LOCAL.
+func ReadProxyV1(r *bufio.Reader) (ProxyHeader, error) {
+	var h ProxyHeader
+	var line []byte
+	for len(line) < 107 {
+		b, err := r.ReadByte()
+		if err != nil {
+			return h, err
+		}
+		line = append(line, b)
+		if b == '\n' {
+			break
+		}
+	}
+	s, ok := strings.CutSuffix(string(line), "\r\n")
+	if !ok || !strings.HasPrefix(s, "PROXY ") {
+		return h, errors.New("bad PROXY v1 header")
+	}
+	f := strings.Split(s, " ")
+	if len(f) >= 2 && f[1] == "UNKNOWN" {
+		h.Local = true
+		return h, nil
+	}
+	if len(f) != 6 || (f[1] != "TCP4" && f[1] != "TCP6") {
+		return h, fmt.Errorf("bad PROXY v1 header %q", s)
+	}
+	sa, err1 := netip.ParseAddr(f[2])
+	da, err2 := netip.ParseAddr(f[3])
+	sp, err3 := strconv.ParseUint(f[4], 10, 16)
+	dp, err4 := strconv.ParseUint(f[5], 10, 16)
+	if err1 != nil || err2 != nil || err3 != nil || err4 != nil {
+		return h, fmt.Errorf("bad PROXY v1 header %q", s)
+	}
+	h.Src, h.Dst = netip.AddrPortFrom(sa.Unmap(), uint16(sp)), netip.AddrPortFrom(da.Unmap(), uint16(dp))
+	return h, nil
+}
+
+// AppendProxyV1Local appends "PROXY UNKNOWN": the connection is the sender's own.
+func AppendProxyV1Local(b []byte) []byte { return append(b, "PROXY UNKNOWN\r\n"...) }
 
 // HasProxyV2 says whether r starts with a PROXY v2 signature, waiting for at most the 12 bytes it needs.
 func HasProxyV2(r *bufio.Reader) (bool, error) {

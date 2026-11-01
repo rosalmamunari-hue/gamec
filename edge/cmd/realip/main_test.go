@@ -72,7 +72,7 @@ var (
 func setup(t *testing.T, mod func(*config)) (string, chan seen) {
 	game, ch := startGame(t)
 	trust, _ := parseTrust("203.0.113.11, 203.0.113.64/26")
-	cfg := &config{trust: trust, outer: true, send: true, backend: game, logf: t.Logf}
+	cfg := &config{trust: trust, outer: true, send: "v2", backend: game, logf: t.Logf}
 	if mod != nil {
 		mod(cfg)
 	}

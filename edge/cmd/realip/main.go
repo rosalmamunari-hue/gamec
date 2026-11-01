@@ -10,6 +10,9 @@
 //
 //	internet -> anti-DDoS front -> realip :10443 -> game server 127.0.0.1:10444 (expects PROXY v2)
 //
+// Headers of either version are read (a front adding v1 and nodes running edge -proxy-v1 work too); -send picks
+// the one the game server gets.
+//
 // It can be started before the nodes send their header: from a node without one the connection is passed on
 // with the node's address, as before.
 package main
@@ -35,8 +38,8 @@ var (
 	listen    = flag.String("listen", ":10443", "where the anti-DDoS front (or the nodes) connect")
 	backend   = flag.String("backend", "127.0.0.1:10444", "the game server")
 	trustList = flag.String("trust", "", "the nodes' outgoing addresses, comma separated IPs or CIDRs (required)")
-	outer     = flag.Bool("outer", true, "connections arrive with a PROXY v2 header of the anti-DDoS front; false: the nodes connect directly")
-	send      = flag.Bool("send", true, "send the game server a PROXY v2 header; false: it gets the bare stream")
+	outer     = flag.Bool("outer", true, "connections arrive with a PROXY header (v1 or v2) of the anti-DDoS front; false: the nodes connect directly")
+	send      = flag.String("send", "v2", "the header the game server gets: v1, v2, or none")
 	onlyNodes = flag.Bool("only-nodes", false, "refuse every connection that does not come from a node")
 	quiet     = flag.Bool("quiet", false, "do not log refused connections")
 )
@@ -44,7 +47,7 @@ var (
 type config struct {
 	trust     []netip.Prefix
 	outer     bool
-	send      bool
+	send      string // "v1", "v2" or "none"
 	onlyNodes bool
 	backend   string
 	logf      func(string, ...any)
@@ -93,7 +96,7 @@ func (cfg *config) serve(c net.Conn) {
 	src, dst := shieldclient.AddrPortOf(c.RemoteAddr()), shieldclient.AddrPortOf(c.LocalAddr())
 	local := false
 	if cfg.outer {
-		h, err := shieldclient.ReadProxyV2(br)
+		h, err := shieldclient.ReadProxy(br)
 		if err != nil {
 			cfg.logf("refused %s: no PROXY header from the front: %v", c.RemoteAddr(), err)
 			return
@@ -108,7 +111,7 @@ func (cfg *config) serve(c net.Conn) {
 			return
 		}
 		c.SetReadDeadline(time.Now().Add(peekWait))
-		inner, err := shieldclient.HasProxyV2(br)
+		inner, err := shieldclient.HasProxy(br)
 		if err != nil && !isTimeout(err) {
 			return // gone before saying anything
 		}
@@ -117,7 +120,7 @@ func (cfg *config) serve(c net.Conn) {
 			cfg.logf("refused %s: names a player but is not one of the nodes (add its address to -trust if it is a node)", src)
 			return
 		case inner:
-			h, err := shieldclient.ReadProxyV2(br)
+			h, err := shieldclient.ReadProxy(br)
 			if err != nil {
 				cfg.logf("refused %s: bad PROXY header from the node: %v", src, err)
 				return
@@ -136,12 +139,16 @@ func (cfg *config) serve(c net.Conn) {
 	}
 	defer up.Close()
 	var head []byte
-	if cfg.send {
-		if local || !src.IsValid() {
-			head = shieldclient.AppendProxyV2Local(head)
-		} else {
-			head = shieldclient.AppendProxyV2(head, src, dst)
-		}
+	named := !local && src.IsValid() && dst.IsValid()
+	switch {
+	case cfg.send == "v2" && named:
+		head = shieldclient.AppendProxyV2(head, src, dst)
+	case cfg.send == "v2":
+		head = shieldclient.AppendProxyV2Local(head)
+	case cfg.send == "v1" && named:
+		head = shieldclient.AppendProxyV1(head, src, dst)
+	case cfg.send == "v1":
+		head = shieldclient.AppendProxyV1Local(head)
 	}
 	if n := br.Buffered(); n > 0 {
 		b, _ := br.Peek(n)
@@ -185,6 +192,9 @@ func main() {
 	trust, err := parseTrust(*trustList)
 	if err != nil {
 		log.Fatal(err)
+	}
+	if *send != "v1" && *send != "v2" && *send != "none" {
+		log.Fatal("-send must be v1, v2 or none")
 	}
 	if len(trust) == 0 {
 		fmt.Fprintln(os.Stderr, "-trust is required: the nodes' addresses, e.g. -trust 203.0.113.11,203.0.113.12")
