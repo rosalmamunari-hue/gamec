@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"html/template"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -28,6 +29,7 @@ import (
 	"gamec/panel/internal/engine"
 	"gamec/panel/internal/notify"
 	"gamec/panel/internal/ops"
+	"gamec/panel/internal/sshx"
 	"gamec/panel/internal/store"
 	"gamec/panel/internal/vault"
 )
@@ -65,6 +67,9 @@ type Server struct {
 	// front). Only turn it on when the panel is reachable only through that proxy.
 	TrustProxy bool
 
+	// RunWithPassword logs in with a password and runs one command (the one-click install); nil means
+	// sshx.DialPassword through the egress host when one is set.
+	RunWithPassword func(ctx context.Context, addr, user, password, cmd string, stdin io.Reader) (sshx.Result, string, error)
 	// FetchPin reads the TLS pin a node presents (for the add-a-node wizard); nil means connect to it.
 	FetchPin func(addr string, timeout time.Duration) (string, error)
 	// Notifier sends alerts and Alerter decides when; nil means the defaults.

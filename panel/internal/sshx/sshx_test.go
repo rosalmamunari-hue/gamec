@@ -356,3 +356,43 @@ func TestAServerWithOnlyAWeakerHostKeyIsRefusedClearly(t *testing.T) {
 		t.Fatal("the panel must not fall back to another host key type")
 	}
 }
+
+func TestAPasswordLoginReportsTheKeyItAccepted(t *testing.T) {
+	srv := startServer(t, clientKey(t).PublicKey(), echo)
+	cfg := &ssh.ServerConfig{PasswordCallback: func(_ ssh.ConnMetadata, pw []byte) (*ssh.Permissions, error) {
+		if string(pw) == "right one" {
+			return nil, nil
+		}
+		return nil, errors.New("no")
+	}}
+	cfg.AddHostKey(srv.hostKey)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			nc, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go srv.serve(nc, cfg)
+		}
+	}()
+	tg := Target{Addr: ln.Addr().String(), User: "root", Timeout: 5 * time.Second}
+	if _, _, err := DialPassword(tg, "wrong"); err == nil {
+		t.Fatal("a wrong password got in")
+	}
+	c, seen, err := DialPassword(tg, "right one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if seen != ssh.FingerprintSHA256(srv.hostKey.PublicKey()) {
+		t.Fatalf("reported %s", seen)
+	}
+	if r, err := c.Run(context.Background(), "id", nil); err != nil || r.Stdout != "ran: id\n" {
+		t.Fatal(r, err)
+	}
+}

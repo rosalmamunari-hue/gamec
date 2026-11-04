@@ -1,8 +1,11 @@
 package web
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"html"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -10,6 +13,7 @@ import (
 	"time"
 
 	"gamec/panel/internal/engine"
+	"gamec/panel/internal/sshx"
 )
 
 const secretHex = "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
@@ -133,4 +137,104 @@ func firstMsg(body string) string {
 		return body[i : i+min(200, len(body)-i)]
 	}
 	return ""
+}
+
+// ---------------------------------------------------------------- one-click install
+
+type fakeRoot struct {
+	password string // the right one
+	seen     string // the SSH key the login presents
+	printed  string // what the script reports as its SSH key
+	exit     int
+	gotPW    []string
+	gotCmd   string
+	gotIn    string
+}
+
+func (f *fakeRoot) run(_ context.Context, addr, user, password, cmd string, stdin io.Reader) (sshx.Result, string, error) {
+	f.gotPW = append(f.gotPW, password)
+	if user != "root" || password != f.password {
+		return sshx.Result{}, "", errors.New("ssh: unable to authenticate")
+	}
+	b, _ := io.ReadAll(stdin)
+	f.gotCmd, f.gotIn = cmd, string(b)
+	out := "Installed.\n   node pin:  " + pin + "\n   SSH key:   " + f.printed + "\n"
+	if f.exit != 0 {
+		return sshx.Result{Stderr: "edge does not match its published checksum; stopping\n", Exit: f.exit}, f.seen, nil
+	}
+	return sshx.Result{Stdout: out}, f.seen, nil
+}
+
+func autoEnv(t *testing.T) (*sshEnv, *client, *fakeRoot, *string) {
+	e, a, nodePin := wizardEnv(t)
+	f := &fakeRoot{password: "root pass 123", seen: fp1, printed: fp1}
+	e.s.RunWithPassword = f.run
+	return e, a, f, nodePin
+}
+
+func TestOneClickInstallLogsInRunsTheScriptAndAddsTheNode(t *testing.T) {
+	e, a, f, _ := autoEnv(t)
+	st, body, h := a.post("/cluster/"+e.cl.ID+"/node/new/auto", with(wizardForm1(), "csrf", a.csrf(), "password", f.password), nil)
+	if st != http.StatusSeeOther {
+		t.Fatalf("%d %s", st, firstMsg(body))
+	}
+	if loc, _ := url.QueryUnescape(h.Get("Location")); !strings.Contains(loc, fp1) {
+		t.Errorf("the SSH key accepted at the first login should be shown: %s", loc)
+	}
+	if f.gotCmd != installCmd || !strings.Contains(f.gotIn, secretHex) || !strings.Contains(f.gotIn, "-listen :40123 -origin 203.0.113.50:10443") {
+		t.Fatalf("ran %q", f.gotCmd)
+	}
+	ns := e.st.Snapshot().NodesOf(e.cl.ID)
+	if len(ns) != 1 || ns[0].Addr() != "203.0.113.21:40123" || ns[0].Pin != pin || ns[0].HostKey != fp1 || ns[0].SSHUser != "gamec-ops" {
+		t.Fatalf("stored: %+v", ns)
+	}
+	_, audit, _ := a.get("/audit")
+	if !strings.Contains(audit, "node-auto-install") || strings.Contains(audit, f.password) || strings.Contains(audit, secretHex) {
+		t.Error("the install is audited, without the password or the secret")
+	}
+	if strings.Contains(fmt.Sprint(e.st.Snapshot()), f.password) {
+		t.Error("the password was stored")
+	}
+}
+
+func TestOneClickInstallSavesNothingWhenSomethingIsWrong(t *testing.T) {
+	e, a, f, nodePin := autoEnv(t)
+	post := func(pw string) (int, string) {
+		st, body, _ := a.post("/cluster/"+e.cl.ID+"/node/new/auto", with(wizardForm1(), "csrf", a.csrf(), "password", pw), nil)
+		return st, html.UnescapeString(body)
+	}
+	if st, body := post(""); st != http.StatusBadRequest || !strings.Contains(body, "root 密码") || len(f.gotPW) != 0 {
+		t.Errorf("no password: %d", st)
+	}
+	if st, body := post("wrong"); st != http.StatusBadGateway || !strings.Contains(body, "PermitRootLogin") || strings.Contains(body, "wrong") {
+		t.Errorf("a wrong password: %d", st)
+	}
+	f.exit = 1
+	if st, body := post(f.password); st != http.StatusBadGateway || !strings.Contains(body, "checksum") {
+		t.Errorf("a failed script: %d", st)
+	}
+	f.exit = 0
+	f.printed = fp2 // the machine says it has another key than the one the login saw
+	if st, _ := post(f.password); st != http.StatusConflict {
+		t.Errorf("a login to someone else: %d", st)
+	}
+	f.printed = fp1
+	*nodePin = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" // the network shows another node than the one installed
+	if st, _ := post(f.password); st != http.StatusConflict {
+		t.Errorf("a different pin over the network: %d", st)
+	}
+	if n := len(e.st.Snapshot().Nodes); n != 0 {
+		t.Fatalf("%d nodes saved", n)
+	}
+	// installed, but the port is not open yet: carry on with the manual check, with the fingerprints to compare
+	*nodePin = ""
+	old := installTimeout
+	installTimeout = 3 * time.Second
+	defer func() { installTimeout = old }()
+	if st, body := post(f.password); st != 200 || !strings.Contains(body, "再试一次") || !strings.Contains(body, pin) {
+		t.Errorf("a node not reachable yet: %d", st)
+	}
+	if n := len(e.st.Snapshot().Nodes); n != 0 {
+		t.Fatalf("%d nodes saved", n)
+	}
 }

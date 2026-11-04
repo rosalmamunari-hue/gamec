@@ -1,6 +1,6 @@
-// Package sshx is the SSH client the panel uses to manage nodes. It logs in with a key only (no passwords),
-// refuses any server whose host key is not the one an administrator confirmed, caps what it reads back, and
-// honours cancellation.
+// Package sshx is the SSH client the panel uses to manage nodes. It logs in with a key, refuses any server
+// whose host key is not the one an administrator confirmed, caps what it reads back, and honours
+// cancellation. The one exception is DialPassword, used once to install a brand-new server.
 package sshx
 
 import (
@@ -141,18 +141,45 @@ func Dial(t Target) (*Conn, error) {
 	if t.HostKey == "" {
 		return nil, ErrHostKeyUnknown
 	}
+	return dial(t, []ssh.AuthMethod{ssh.PublicKeys(t.Signer)}, func(_ string, _ net.Addr, key ssh.PublicKey) error {
+		if ssh.FingerprintSHA256(key) != t.HostKey {
+			return fmt.Errorf("%w (confirmed %s, server presented %s)", ErrHostKeyChanged, t.HostKey, ssh.FingerprintSHA256(key))
+		}
+		return nil
+	})
+}
+
+// DialPassword logs in with a password, for installing a brand-new server whose host key nobody has
+// confirmed yet. Whatever key the server presents is accepted and returned (its SHA256 fingerprint), so the
+// caller can compare it with what the server reports about itself. The password is only sent, never kept.
+// t.HostKey and t.Signer are not used.
+func DialPassword(t Target, password string) (*Conn, string, error) {
+	var seen string
+	answer := ssh.KeyboardInteractive(func(_, _ string, questions []string, _ []bool) ([]string, error) {
+		out := make([]string, len(questions))
+		for i := range out {
+			out[i] = password
+		}
+		return out, nil
+	})
+	c, err := dial(t, []ssh.AuthMethod{ssh.Password(password), answer}, func(_ string, _ net.Addr, key ssh.PublicKey) error {
+		seen = ssh.FingerprintSHA256(key)
+		return nil
+	})
+	if err != nil {
+		return nil, seen, err
+	}
+	return c, seen, nil
+}
+
+func dial(t Target, auth []ssh.AuthMethod, check ssh.HostKeyCallback) (*Conn, error) {
 	cfg := &ssh.ClientConfig{
 		User:              t.User,
-		Auth:              []ssh.AuthMethod{ssh.PublicKeys(t.Signer)},
+		Auth:              auth,
 		Timeout:           timeout(t.Timeout),
 		HostKeyAlgorithms: hostKeyAlgos,
 		ClientVersion:     "SSH-2.0-gamec-panel",
-		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
-			if ssh.FingerprintSHA256(key) != t.HostKey {
-				return fmt.Errorf("%w (confirmed %s, server presented %s)", ErrHostKeyChanged, t.HostKey, ssh.FingerprintSHA256(key))
-			}
-			return nil
-		},
+		HostKeyCallback:   check,
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout(t.Timeout))
 	defer cancel()

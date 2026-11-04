@@ -200,3 +200,17 @@ func (r *Releases) Checksums(ctx context.Context, tag string) (map[string]string
 	}
 	return out, nil
 }
+
+// InstallReport reads the two fingerprints the install script prints at the end ("node pin:" and
+// "SSH key:"). Either is empty when the script did not print it.
+func InstallReport(stdout string) (pin, sshKey string) {
+	for _, line := range strings.Split(stdout, "\n") {
+		line = strings.TrimSpace(line)
+		if v, ok := strings.CutPrefix(line, "node pin:"); ok {
+			pin = strings.TrimSpace(v)
+		} else if v, ok := strings.CutPrefix(line, "SSH key:"); ok && strings.HasPrefix(strings.TrimSpace(v), "SHA256:") {
+			sshKey = strings.TrimSpace(v)
+		}
+	}
+	return pin, sshKey
+}

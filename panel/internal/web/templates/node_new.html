@@ -34,6 +34,8 @@
         <div class="form-hint">已经帮你随机选好了。<b>记得在云服务商的安全组里放行这个端口（TCP）。</b></div></div>
       <div class="col-md-6 mb-3"><label class="form-label required" for="w-origin">源站地址</label><input class="form-control mono" id="w-origin" name="origin" value="{{$f.Origin}}" placeholder="203.0.113.50:10443" required>
         <div class="form-hint">游戏服务器的 IP:端口。{{if $c.Origin}}已经按渠道设置填好了。{{else}}会顺便存进渠道设置。{{end}}</div></div>
+      <div class="col-md-6 mb-3"><label class="form-label" for="w-pw">root 密码（一键安装用）</label><input class="form-control" id="w-pw" name="password" type="password" autocomplete="new-password">
+        <div class="form-hint">填了就点「一键安装」：面板用这个密码登录一次，装好后自动加入，<b>密码不保存、不记日志</b>，装完就可以改掉。不填就点「生成脚本」自己运行。</div></div>
     </div>
     <div class="accordion" id="w-more">
       <div class="accordion-item">
@@ -50,7 +52,11 @@
       </div>
     </div>
   </div>
-  <div class="card-footer text-end"><button class="btn btn-primary"{{if not $d.Ready}} disabled{{end}} data-busy="生成中…">下一步：生成安装脚本{{icon "arrow-right"}}</button></div>
+  {{/* the one-click button comes first so Enter in the password box uses it; flex-row-reverse shows it on the right */}}
+  <div class="card-footer d-flex flex-row-reverse gap-2">
+    <button class="btn btn-primary" formaction="/cluster/{{$c.ID}}/node/new/auto"{{if not $d.Ready}} disabled{{end}} data-busy="正在安装，大约 1-2 分钟…">{{icon "rocket"}}一键安装</button>
+    <button class="btn" formaction="/cluster/{{$c.ID}}/node/new/script"{{if not $d.Ready}} disabled{{end}} data-busy="生成中…">生成脚本，我自己运行</button>
+  </div>
 </form>
 </div>
 <div class="col-lg-4">

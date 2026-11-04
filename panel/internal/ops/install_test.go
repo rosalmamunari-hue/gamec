@@ -83,3 +83,13 @@ func TestTheInstallScriptCanTellTheOriginThePlayer(t *testing.T) {
 		t.Fatal("the node is not started with -proxy-v2")
 	}
 }
+
+func TestTheInstallReportIsRead(t *testing.T) {
+	out := "...\n==============\n Installed. Compare these two lines with what the panel shows:\n   node pin:  abc=\n   SSH key:   SHA256:xyz\n=====\n"
+	if p, k := InstallReport(out); p != "abc=" || k != "SHA256:xyz" {
+		t.Fatal(p, k)
+	}
+	if p, k := InstallReport("   node pin:  abc=\n   SSH key:   MISSING (run ssh-keygen -A)\n"); p != "abc=" || k != "" {
+		t.Fatal(p, k)
+	}
+}

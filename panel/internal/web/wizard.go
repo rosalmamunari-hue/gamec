@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand/v2"
 	"net"
 	"net/http"
@@ -35,6 +36,7 @@ func (s *Server) routesWizard(mux *http.ServeMux) {
 	mux.HandleFunc("POST /cluster/{id}/node/new/script", s.need(true, s.wizardScript))
 	mux.HandleFunc("POST /cluster/{id}/node/new/check", s.need(true, s.wizardCheck))
 	mux.HandleFunc("POST /cluster/{id}/node/new/finish", s.need(true, s.wizardFinish))
+	mux.HandleFunc("POST /cluster/{id}/node/new/auto", s.need(true, s.wizardAuto))
 }
 
 // wizardForm is what the administrator typed in step 1; it is carried through the later steps.
@@ -139,36 +141,44 @@ func (s *Server) wizardScript(w http.ResponseWriter, r *http.Request, _ *auth.Se
 		s.renderWizard(w, r, d, err.Error(), http.StatusBadRequest)
 		return
 	}
+	script, msg, status := s.buildInstall(r, c, f)
+	if msg != "" {
+		s.renderWizard(w, r, d, msg, status)
+		return
+	}
+	s.log(r, "node-install-script", fmt.Sprintf("cluster=%s host=%s port=%d release=%s", c.Name, f.Host, f.Port, safe(f.Tag)), true)
+	d.Step, d.Script = 2, script
+	s.renderWizard(w, r, d, "", http.StatusOK)
+}
+
+// buildInstall makes the install script for the new server. On failure it returns what to tell the
+// administrator and the HTTP status.
+func (s *Server) buildInstall(r *http.Request, c *store.Cluster, f wizardForm) (script, msg string, status int) {
 	for _, n := range s.Store.Snapshot().Nodes {
 		if n.Addr() == f.addr() {
-			s.renderWizard(w, r, d, f.addr()+" 已经是节点「"+n.Name+"」了。", http.StatusBadRequest)
-			return
+			return "", f.addr() + " 已经是节点「" + n.Name + "」了。", http.StatusBadRequest
 		}
 	}
 	pub, has, err := s.panelKey()
 	if err != nil || !has {
-		s.renderWizard(w, r, d, "面板还没有 SSH 密钥，或保险库上锁了。", http.StatusBadRequest)
-		return
+		return "", "面板还没有 SSH 密钥，或保险库上锁了。", http.StatusBadRequest
 	}
 	secret, ok, err := s.Vault.Get(engine.NodeSecretName(c.ID))
 	if err != nil || !ok {
-		s.renderWizard(w, r, d, "保险库里找不到这个渠道的节点密钥。", http.StatusBadRequest)
-		return
+		return "", "保险库里找不到这个渠道的节点密钥。", http.StatusBadRequest
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	sums, err := s.releases().Checksums(ctx, f.Tag)
 	if err != nil {
-		s.renderWizard(w, r, d, "读不到版本 "+f.Tag+" 的校验码："+err.Error(), http.StatusBadGateway)
-		return
+		return "", "读不到版本 " + f.Tag + " 的校验码：" + err.Error(), http.StatusBadGateway
 	}
 	base := strings.TrimRight(s.releases().Base, "/") + "/" + f.Tag + "/"
 	prog := func(name string) ops.Program { return ops.Program{URL: base + name, SHA256: sums[name]} }
-	script, err := ops.InstallScript(ops.InstallParams{Unit: "gamec-edge", Host: f.Host, Port: f.Port, Origin: f.Origin, ProxyV2: c.ProxyV2, Secret: secret,
+	script, err = ops.InstallScript(ops.InstallParams{Unit: "gamec-edge", Host: f.Host, Port: f.Port, Origin: f.Origin, ProxyV2: c.ProxyV2, Secret: secret,
 		Edge: prog("edge-linux-amd64"), Gencert: prog("gencert-linux-amd64"), Nodectl: prog("nodectl-linux-amd64"), PubLine: pub, From: f.From})
 	if err != nil {
-		s.renderWizard(w, r, d, "生成脚本失败："+err.Error(), http.StatusBadRequest)
-		return
+		return "", "生成脚本失败：" + err.Error(), http.StatusBadRequest
 	}
 	if c.Origin == "" { // remember the origin for the next node
 		s.Store.Mutate(func(st *store.State) error {
@@ -178,9 +188,7 @@ func (s *Server) wizardScript(w http.ResponseWriter, r *http.Request, _ *auth.Se
 			return nil
 		})
 	}
-	s.log(r, "node-install-script", fmt.Sprintf("cluster=%s host=%s port=%d release=%s", c.Name, f.Host, f.Port, safe(f.Tag)), true)
-	d.Step, d.Script = 2, script
-	s.renderWizard(w, r, d, "", http.StatusOK)
+	return script, "", 0
 }
 
 // readFingerprints reads, through the egress host when one is set, the TLS pin and the SSH key the new
@@ -254,12 +262,23 @@ func (s *Server) wizardFinish(w http.ResponseWriter, r *http.Request, _ *auth.Se
 		s.renderWizard(w, r, d, "服务器出示的指纹和你刚才看到的不一样，没有保存任何东西。请重新核对下面的指纹。", http.StatusConflict)
 		return
 	}
+	msg, err := s.saveWizardNode(r, c, f, pin, hostKey, "wizard")
+	if err != nil {
+		s.renderWizard(w, r, d, friendlyStoreError(err), http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, "/cluster/"+c.ID+"?ok="+url.QueryEscape(msg)+"#nodes", http.StatusSeeOther)
+}
+
+// saveWizardNode adds the new server as a node, with the fingerprints that were checked, and returns the
+// message for the channel page.
+func (s *Server) saveWizardNode(r *http.Request, c *store.Cluster, f wizardForm, pin, hostKey, how string) (string, error) {
 	n := &store.Node{ID: store.NewID(), ClusterID: c.ID, Name: f.Name, Host: f.Host, Port: f.Port, Pin: pin, Enabled: true,
 		SSHUser: "gamec-ops", HostKey: hostKey, Created: s.now()}
 	if f.SSHPort != 22 {
 		n.SSHPort = f.SSHPort
 	}
-	err = s.Store.Mutate(func(st *store.State) error {
+	err := s.Store.Mutate(func(st *store.State) error {
 		if st.Cluster(c.ID) == nil {
 			return errors.New("没有这个渠道")
 		}
@@ -267,10 +286,9 @@ func (s *Server) wizardFinish(w http.ResponseWriter, r *http.Request, _ *auth.Se
 		return nil
 	})
 	if err != nil {
-		s.renderWizard(w, r, d, friendlyStoreError(err), http.StatusBadRequest)
-		return
+		return "", err
 	}
-	s.log(r, "node-add", fmt.Sprintf("cluster=%s node=%s %s pin=%s ssh=%s (wizard)", c.ID, safe(n.Name), n.Addr(), pin, hostKey), true)
+	s.log(r, "node-add", fmt.Sprintf("cluster=%s node=%s %s pin=%s ssh=%s (%s)", c.ID, safe(n.Name), n.Addr(), pin, hostKey, how), true)
 	go s.Mon.ProbeAll(context.Background(), []*store.Node{n})
 	msg := "节点「" + n.Name + "」已加入，远程管理也开好了。它要连续通过 5 次检查（约 5 分钟）才会进名单"
 	if c.AutoPublish {
@@ -278,5 +296,135 @@ func (s *Server) wizardFinish(w http.ResponseWriter, r *http.Request, _ *auth.Se
 	} else {
 		msg += "，然后请点「立即更新名单」。"
 	}
+	return msg, nil
+}
+
+// ---------------------------------------------------------------- one-click install with the root password
+
+// installCmd runs the script that arrives on stdin from a private temporary file, so nothing the script
+// starts can read the rest of it as its own input.
+const installCmd = `f=$(mktemp) && cat > "$f" && sh "$f" </dev/null; rc=$?; rm -f "$f"; exit $rc`
+
+// installTimeout bounds the whole one-click install (two downloads and starting the service).
+var installTimeout = 5 * time.Minute
+
+// runWithPassword logs in to addr with a password, runs cmd with stdin and returns its result and the SSH key
+// the server presented.
+func (s *Server) runWithPassword(ctx context.Context, addr, user, password, cmd string, stdin io.Reader) (sshx.Result, string, error) {
+	if s.RunWithPassword != nil {
+		return s.RunWithPassword(ctx, addr, user, password, cmd, stdin)
+	}
+	c, seen, err := sshx.DialPassword(sshx.Target{Addr: addr, User: user, Timeout: 20 * time.Second, Dial: s.nodeDial()}, password)
+	if err != nil {
+		return sshx.Result{}, seen, err
+	}
+	defer c.Close()
+	res, err := c.Run(ctx, cmd, stdin)
+	return res, seen, err
+}
+
+// wizardAuto does steps 2 and 3 itself: it logs in to the new server with the root password typed in step 1,
+// runs the install script there, and adds the node once what the script printed matches what the server
+// presents over the network. The password is used for this one login only; it is not stored or logged.
+//
+// What this cannot check is the very first login: the panel has never seen the server's SSH key, so it
+// accepts the one presented. It is shown in the result so it can be compared with the cloud console.
+func (s *Server) wizardAuto(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
+	c, ok := s.wizardCluster(w, r)
+	if !ok {
+		return
+	}
+	f, err := readWizardForm(r)
+	d := wizardData{Cluster: c, Form: f}
+	if err != nil {
+		s.renderWizard(w, r, d, err.Error(), http.StatusBadRequest)
+		return
+	}
+	password := r.FormValue("password")
+	if password == "" {
+		s.renderWizard(w, r, d, "一键安装要填服务器的 root 密码。不想把密码交给面板，就点「生成脚本，我自己运行」。", http.StatusBadRequest)
+		return
+	}
+	script, msg, status := s.buildInstall(r, c, f)
+	if msg != "" {
+		s.renderWizard(w, r, d, msg, status)
+		return
+	}
+	what := fmt.Sprintf("cluster=%s host=%s port=%d release=%s", c.Name, f.Host, f.Port, safe(f.Tag))
+	ctx, cancel := context.WithTimeout(r.Context(), installTimeout)
+	defer cancel()
+	res, seen, err := s.runWithPassword(ctx, f.sshAddr(), "root", password, installCmd, strings.NewReader(script))
+	if err != nil {
+		s.log(r, "node-auto-install", what+": "+err.Error(), false)
+		s.renderWizard(w, r, d, fmt.Sprintf("没能登录 %s 并运行安装（%v）。请检查 IP、SSH 端口和 root 密码；有的服务器默认不允许 root 用密码登录（sshd 的 PermitRootLogin）。", f.sshAddr(), err), http.StatusBadGateway)
+		return
+	}
+	if res.Exit != 0 {
+		s.log(r, "node-auto-install", fmt.Sprintf("%s: the script exited with %d", what, res.Exit), false)
+		s.renderWizard(w, r, d, fmt.Sprintf("安装脚本在服务器上出错了（退出码 %d）：%s", res.Exit, lastLines(res.Stderr, res.Stdout)), http.StatusBadGateway)
+		return
+	}
+	printedPin, printedKey := ops.InstallReport(res.Stdout)
+	if printedPin == "" || printedKey == "" {
+		s.log(r, "node-auto-install", what+": the script did not print both fingerprints", false)
+		s.renderWizard(w, r, d, "脚本跑完了，但没有印出节点指纹和 SSH 指纹："+lastLines(res.Stderr, res.Stdout), http.StatusBadGateway)
+		return
+	}
+	if printedKey != seen {
+		s.log(r, "node-auto-install", fmt.Sprintf("%s: logged in to %s but the server reports %s", what, seen, printedKey), false)
+		s.renderWizard(w, r, d, "登录时服务器出示的 SSH 指纹和它自己报的不一样，可能有人在中间拦截。没有保存任何东西，请改用「生成脚本，我自己运行」。", http.StatusConflict)
+		return
+	}
+	s.log(r, "node-auto-install", what+" ssh="+seen, true)
+
+	// The same check a person does in step 3, against what the script printed.
+	var pin, hostKey string
+	for try := 0; ; try++ {
+		pin, hostKey, err = s.readFingerprints(f)
+		if err == nil || try == 2 || ctx.Err() != nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(2 * time.Second):
+		}
+	}
+	if err != nil {
+		d.Step, d.Problem = 3, err.Error()+fmt.Sprintf(" 节点已经装好了。放行端口后点「再试一次」，对照的指纹是：node pin %s，SSH key %s。", printedPin, printedKey)
+		s.renderWizard(w, r, d, "", http.StatusOK)
+		return
+	}
+	if pin != printedPin || hostKey != printedKey {
+		s.log(r, "node-add", fmt.Sprintf("cluster=%s %s: the fingerprints over the network differ from what the script printed", c.Name, f.addr()), false)
+		s.renderWizard(w, r, d, fmt.Sprintf("从网络上读到的指纹和服务器上脚本印出的不一样（读到 %s / %s，脚本印出 %s / %s），可能 IP 不对或有人拦截。没有保存任何东西。", pin, hostKey, printedPin, printedKey), http.StatusConflict)
+		return
+	}
+	msg, err = s.saveWizardNode(r, c, f, pin, hostKey, "one-click install")
+	if err != nil {
+		s.renderWizard(w, r, d, friendlyStoreError(err), http.StatusBadRequest)
+		return
+	}
+	msg += " 首次登录时记下的 SSH 指纹是 " + hostKey + "，想核对可以在云服务商控制台里看。现在可以改掉 root 密码了。"
 	http.Redirect(w, r, "/cluster/"+c.ID+"?ok="+url.QueryEscape(msg)+"#nodes", http.StatusSeeOther)
+}
+
+// lastLines is the end of what a failed script said, for the error message.
+func lastLines(outs ...string) string {
+	for _, o := range outs {
+		var keep []string
+		for _, l := range strings.Split(strings.TrimSpace(o), "\n") {
+			if l = strings.TrimSpace(l); l != "" {
+				keep = append(keep, l)
+			}
+		}
+		if len(keep) > 0 {
+			keep = keep[max(0, len(keep)-5):]
+			out := strings.Join(keep, " | ")
+			if r := []rune(out); len(r) > 600 {
+				out = "…" + string(r[len(r)-600:])
+			}
+			return out
+		}
+	}
+	return "（没有输出）"
 }
