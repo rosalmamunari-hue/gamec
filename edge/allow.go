@@ -8,9 +8,10 @@ import (
 )
 
 // -allow-ips lists addresses many players share (a VPN exit, an office), which would otherwise run into the
-// per-address limits. They are exempt from -max-per-ip and -token-ip-limit only: every connection still needs
-// a valid token, each device keeps its own limit, and -max-conns still caps the total.
-var allowIPs = flag.String("allow-ips", "", "comma separated IPs or CIDRs exempt from -max-per-ip and -token-ip-limit (addresses many players share, like a VPN exit); tokens, the per-device limit and -max-conns still apply")
+// per-address limits. They are exempt from the rate limits (-max-per-ip, -token-ip-limit, -token-device-limit)
+// only: every connection still needs a valid token, device ids must be valid and not -banned, and -max-conns
+// still caps the total.
+var allowIPs = flag.String("allow-ips", "", "comma separated IPs or CIDRs exempt from -max-per-ip, -token-ip-limit and -token-device-limit (addresses many players share, like a VPN exit); tokens, device ids, -banned and -max-conns still apply")
 
 var allowed []netip.Prefix
 

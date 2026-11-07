@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func TestAnAllowedAddressSkipsOnlyThePerAddressLimits(t *testing.T) {
+func TestAnAllowedAddressSkipsTheRateLimitsButNotTheChecks(t *testing.T) {
 	resetIssuing()
 	addr := startEdge(t)
 	*maxPerIP, *ipTokenLimit, *devTokenLimit = 2, 2, 3
@@ -32,11 +32,13 @@ func TestAnAllowedAddressSkipsOnlyThePerAddressLimits(t *testing.T) {
 			t.Fatalf("token %d for an allowed address was refused", i)
 		}
 	}
-	for i := 0; i < 3; i++ {
-		requestToken(t, addr, devID)
+	for i := 0; i < 5; i++ { // more than -token-device-limit
+		if requestToken(t, addr, devID) == "" {
+			t.Fatalf("token %d for one device at an allowed address was refused", i)
+		}
 	}
-	if requestToken(t, addr, devID) != "" {
-		t.Fatal("the per-device limit must still apply")
+	if requestToken(t, addr, "bad id") != "" {
+		t.Fatal("an allowed address still needs a valid device id")
 	}
 	c := dial(t, addr, "not a token")
 	if echoWorks(c) {

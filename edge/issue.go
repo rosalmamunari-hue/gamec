@@ -5,9 +5,11 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"flag"
+	"log"
 	"net"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +33,7 @@ var (
 	deviceIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]{16,64}$`)
 	ipWindow   = newWindow(time.Minute)
 	devWindow  = newWindow(time.Minute)
+	refusalLog = newWindow(time.Minute) // a flood of refusals must not flood the journal
 )
 
 // window is a fixed-window counter per key.
@@ -77,15 +80,27 @@ func isTokenRequest(first []byte) bool {
 }
 
 // handleTokenRequest answers a GET-TOKEN frame. Refusals just close the connection, giving nothing away.
-// exempt skips the per-address limit (-allow-ips).
+// exempt (-allow-ips) skips the per-address and per-device limits; the device id must still be valid and not
+// banned.
 func handleTokenRequest(c net.Conn, ip string, exempt bool, first []byte) {
 	id := string(first[len(tokenRequestPrefix):])
 	now := time.Now()
-	if !deviceIDRe.MatchString(id) ||
-		!(exempt || ipWindow.allow(ip, *ipTokenLimit, now)) ||
-		!devWindow.allow(id, *devTokenLimit, now) ||
-		isBanned(id) {
+	why := ""
+	switch {
+	case !deviceIDRe.MatchString(id):
+		why = "bad device id"
+	case !exempt && !ipWindow.allow(ip, *ipTokenLimit, now):
+		why = "address over -token-ip-limit"
+	case !exempt && !devWindow.allow(id, *devTokenLimit, now):
+		why = "device over -token-device-limit"
+	case isBanned(id):
+		why = "banned device"
+	}
+	if why != "" {
 		stats.refuse("token_refused")
+		if refusalLog.allow("", refusalLogPerMinute, now) {
+			log.Printf("token refused %s: %s (device %s)", ip, why, shortID(id))
+		}
 		return
 	}
 	stats.tokens.Add(1)
@@ -98,4 +113,14 @@ func handleTokenRequest(c net.Conn, ip string, exempt bool, first []byte) {
 	var h [2]byte
 	binary.BigEndian.PutUint16(h[:], uint16(len(body)))
 	c.Write(append(h[:], body...))
+}
+
+const refusalLogPerMinute = 20
+
+// shortID is enough of a device id to tell devices apart in the log, and no more.
+func shortID(id string) string {
+	if len(id) > 8 {
+		id = id[:8] + "…"
+	}
+	return strconv.Quote(id)
 }
