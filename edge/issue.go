@@ -77,11 +77,12 @@ func isTokenRequest(first []byte) bool {
 }
 
 // handleTokenRequest answers a GET-TOKEN frame. Refusals just close the connection, giving nothing away.
-func handleTokenRequest(c net.Conn, ip string, first []byte) {
+// exempt skips the per-address limit (-allow-ips).
+func handleTokenRequest(c net.Conn, ip string, exempt bool, first []byte) {
 	id := string(first[len(tokenRequestPrefix):])
 	now := time.Now()
 	if !deviceIDRe.MatchString(id) ||
-		!ipWindow.allow(ip, *ipTokenLimit, now) ||
+		!(exempt || ipWindow.allow(ip, *ipTokenLimit, now)) ||
 		!devWindow.allow(id, *devTokenLimit, now) ||
 		isBanned(id) {
 		stats.refuse("token_refused")

@@ -145,11 +145,14 @@ func handle(c net.Conn, lim *limiter) {
 	defer c.Close()
 	addr, _, _ := net.SplitHostPort(c.RemoteAddr().String())
 	ip := limitKey(addr)
-	if !lim.acquire(ip) {
-		stats.refuse("per_ip")
-		return
+	exempt := isAllowed(addr)
+	if !exempt {
+		if !lim.acquire(ip) {
+			stats.refuse("per_ip")
+			return
+		}
+		defer lim.release(ip)
 	}
-	defer lim.release(ip)
 
 	// First frame: 2-byte big-endian length + token. Short deadline stops slow-loris.
 	c.SetReadDeadline(time.Now().Add(5 * time.Second))
@@ -169,7 +172,7 @@ func handle(c net.Conn, lim *limiter) {
 		return
 	}
 	if isTokenRequest(buf) {
-		handleTokenRequest(c, ip, buf)
+		handleTokenRequest(c, ip, exempt, buf)
 		return
 	}
 	if isStatsRequest(buf) {
@@ -279,6 +282,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	if allowed, err = parseAllow(*allowIPs); err != nil {
+		log.Fatal(err)
+	}
 	*secret = s
 	var cert tls.Certificate
 	switch {
@@ -300,6 +306,9 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Println("edge listening on", *listen, "-> origin", *origin)
+	if len(allowed) > 0 {
+		fmt.Println("exempt from the per-address limits:", *allowIPs)
+	}
 	lim := &limiter{n: map[string]int{}}
 	slots := make(chan struct{}, *maxConns)
 	var backoff time.Duration
