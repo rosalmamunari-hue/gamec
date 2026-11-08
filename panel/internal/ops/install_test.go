@@ -74,13 +74,19 @@ func TestTheInstallScriptRefusesValuesThatCouldInjectCommands(t *testing.T) {
 
 func TestTheInstallScriptCanTellTheOriginThePlayer(t *testing.T) {
 	p := installParams()
-	p.ProxyV2 = true
-	s, err := InstallScript(p)
-	if err != nil {
-		t.Fatal(err)
+	for _, v := range []string{"v1", "v2"} {
+		p.Proxy = v
+		s, err := InstallScript(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(s, "-origin 203.0.113.50:10443 -proxy-"+v+" -cert") {
+			t.Fatal("the node is not started with -proxy-" + v)
+		}
 	}
-	if !strings.Contains(s, "-origin 203.0.113.50:10443 -proxy-v2 -cert") {
-		t.Fatal("the node is not started with -proxy-v2")
+	p.Proxy = "v3"
+	if _, err := InstallScript(p); err == nil {
+		t.Fatal("v3 accepted")
 	}
 }
 

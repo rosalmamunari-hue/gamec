@@ -381,6 +381,7 @@ func (s *Server) Handler() http.Handler {
 	s.routesSSH(mux)
 	s.routesEdit(mux)
 	s.routesWizard(mux)
+	s.routesRelay(mux)
 	s.routesAlerts(mux)
 	s.routesAccount(mux)
 	s.routesEgress(mux)
@@ -617,6 +618,9 @@ type clusterPageData struct {
 	SealKey string // shown only while the cluster encrypts its list and the vault is unlocked
 	Origin  originResult
 	Latest  string // the newest release, to suggest for upgrades
+	Relays  []relayView
+	// RelayNames names each relay by id, for the nodes table.
+	RelayNames map[string]string
 }
 
 func (s *Server) clusterPage(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
@@ -633,7 +637,11 @@ func (s *Server) renderCluster(w http.ResponseWriter, r *http.Request, id, flash
 	if flash == "" {
 		flash = r.URL.Query().Get("ok")
 	}
-	data := clusterPageData{Row: s.clusterRow(st, c), Origin: s.originState(id), Latest: s.latestRelease()}
+	data := clusterPageData{Row: s.clusterRow(st, c), Origin: s.originState(id), Latest: s.latestRelease(),
+		Relays: relayViews(st, id), RelayNames: map[string]string{}}
+	for _, rl := range st.RelaysOf(id) {
+		data.RelayNames[rl.ID] = rl.Name
+	}
 	// the key is a secret like the others: read-only accounts see that the list is sealed, not the key
 	if sess, _ := r.Context().Value(ctxKey{}).(*auth.Session); c.Sealed && !s.Vault.Sealed() && sess != nil && sess.Role == auth.Admin {
 		data.SealKey, _, _ = s.Vault.Get(engine.SealKeyName(id))
@@ -805,11 +813,11 @@ func (s *Server) nodeResume(w http.ResponseWriter, r *http.Request, _ *auth.Sess
 
 func (s *Server) nodeDelete(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
 	id, nid := r.PathValue("id"), r.PathValue("nid")
-	var label string
+	var label, relayID string
 	err := s.Store.Mutate(func(st *store.State) error {
 		for i, n := range st.Nodes {
 			if n.ID == nid && n.ClusterID == id {
-				label = n.Addr()
+				label, relayID = n.Addr(), n.RelayID
 				st.Nodes = append(st.Nodes[:i], st.Nodes[i+1:]...)
 				s.traffic.forget(nid)
 				return nil
@@ -823,7 +831,13 @@ func (s *Server) nodeDelete(w http.ResponseWriter, r *http.Request, _ *auth.Sess
 	}
 	s.Mon.Forget(nid)
 	s.log(r, "node-delete", fmt.Sprintf("cluster=%s node=%s", id, label), true)
-	s.back(w, r, id, "节点已删除。请再「立即更新名单」一次，把它从名单里拿掉。")
+	msg := "节点已删除。请再「立即更新名单」一次，把它从名单里拿掉。"
+	if relayID != "" {
+		if _, err := s.syncRelay(r.Context(), relayID); err != nil {
+			msg += " 没能更新它所用中转的白名单（" + err.Error() + "），可以稍后在中转列表里点「同步白名单」。"
+		}
+	}
+	s.back(w, r, id, msg)
 }
 
 func (s *Server) probeNow(w http.ResponseWriter, r *http.Request, _ *auth.Session) {

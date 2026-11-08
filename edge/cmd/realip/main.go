@@ -13,6 +13,8 @@
 // Headers of either version are read (a front adding v1 and nodes running edge -proxy-v1 work too); -send picks
 // the one the game server gets.
 //
+// With -pass it runs on a relay server instead (see pass.go): it passes connections on unchanged.
+//
 // It can be started before the nodes send their header: from a node without one the connection is passed on
 // with the node's address, as before.
 package main
@@ -42,6 +44,8 @@ var (
 	send      = flag.String("send", "v2", "the header the game server gets: v1, v2, or none")
 	onlyNodes = flag.Bool("only-nodes", false, "refuse every connection that does not come from a node")
 	quiet     = flag.Bool("quiet", false, "do not log refused connections")
+	pass      = flag.Bool("pass", false, "relay mode, on a relay between the nodes and the anti-DDoS front: pass every connection on unchanged (the node's PROXY header included) to -backend; -trust, -outer and -send do not apply")
+	allowFile = flag.String("allow-file", "", "with -pass: a file listing the addresses that may connect (IPs or CIDRs, one per line or comma separated), re-read when it changes; without it anyone may connect")
 )
 
 type config struct {
@@ -189,6 +193,10 @@ func relay(a, b net.Conn) {
 
 func main() {
 	flag.Parse()
+	if *pass {
+		runPass()
+		return
+	}
 	trust, err := parseTrust(*trustList)
 	if err != nil {
 		log.Fatal(err)

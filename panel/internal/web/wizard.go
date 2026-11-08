@@ -48,6 +48,7 @@ type wizardForm struct {
 	Tag     string
 	Origin  string
 	From    string
+	Relay   string // the relay the node forwards through; empty: straight to Origin
 }
 
 func (f wizardForm) addr() string    { return net.JoinHostPort(f.Host, strconv.Itoa(f.Port)) }
@@ -61,7 +62,8 @@ type wizardData struct {
 	Pin     string // what the new node presents (step 3)
 	HostKey string // its SSH key
 	Problem string // why step 3 could not read the fingerprints yet
-	Ready   bool   // what is needed for step 2 is there (unsealed vault, a panel key)
+	Relays  []*store.Relay
+	Ready   bool // what is needed for step 2 is there (unsealed vault, a panel key)
 	Missing string
 }
 
@@ -69,6 +71,7 @@ func (s *Server) renderWizard(w http.ResponseWriter, r *http.Request, d wizardDa
 	if d.Step == 0 {
 		d.Step = 1
 	}
+	d.Relays = s.Store.Snapshot().RelaysOf(d.Cluster.ID)
 	d.Ready, d.Missing = true, ""
 	switch {
 	case s.Vault.Sealed():
@@ -108,7 +111,8 @@ func (s *Server) wizardStart(w http.ResponseWriter, r *http.Request, _ *auth.Ses
 
 func readWizardForm(r *http.Request) (wizardForm, error) {
 	f := wizardForm{Name: strings.TrimSpace(r.FormValue("name")), Host: strings.TrimSpace(r.FormValue("host")),
-		Tag: strings.TrimSpace(r.FormValue("tag")), Origin: strings.TrimSpace(r.FormValue("origin")), From: strings.TrimSpace(r.FormValue("from"))}
+		Tag: strings.TrimSpace(r.FormValue("tag")), Origin: strings.TrimSpace(r.FormValue("origin")), From: strings.TrimSpace(r.FormValue("from")),
+		Relay: strings.TrimSpace(r.FormValue("relay"))}
 	var err1, err2 error
 	f.Port, err1 = strconv.Atoi(strings.TrimSpace(r.FormValue("port")))
 	f.SSHPort, err2 = strconv.Atoi(strings.TrimSpace(r.FormValue("ssh_port")))
@@ -121,12 +125,30 @@ func readWizardForm(r *http.Request) (wizardForm, error) {
 		return f, errors.New("玩家连接的端口要在 1024 到 65535 之间。")
 	case err2 != nil || f.SSHPort < 1 || f.SSHPort > 65535:
 		return f, errors.New("SSH 端口不对，一般是 22。")
-	case f.Origin == "":
+	case f.Origin == "" && f.Relay == "":
 		return f, errors.New("要填源站地址：节点要知道把玩家的流量转到哪里。")
+	}
+	if f.Relay != "" {
+		return f, nil // the origin is the relay's address (see readWizard)
 	}
 	if err := validOrigin(f.Origin); err != nil {
 		return f, err
 	}
+	return f, nil
+}
+
+// readWizard reads the form and, for a node that forwards through a relay, points it at the relay.
+func (s *Server) readWizard(r *http.Request, c *store.Cluster) (wizardForm, error) {
+	f, err := readWizardForm(r)
+	if err != nil || f.Relay == "" {
+		return f, err
+	}
+	rl := s.Store.Snapshot().Relay(f.Relay)
+	if rl == nil || rl.ClusterID != c.ID {
+		f.Relay = ""
+		return f, errors.New("选的中转不在这个渠道里了，请重新选。")
+	}
+	f.Origin = rl.Addr()
 	return f, nil
 }
 
@@ -135,7 +157,7 @@ func (s *Server) wizardScript(w http.ResponseWriter, r *http.Request, _ *auth.Se
 	if !ok {
 		return
 	}
-	f, err := readWizardForm(r)
+	f, err := s.readWizard(r, c)
 	d := wizardData{Cluster: c, Form: f}
 	if err != nil {
 		s.renderWizard(w, r, d, err.Error(), http.StatusBadRequest)
@@ -175,12 +197,17 @@ func (s *Server) buildInstall(r *http.Request, c *store.Cluster, f wizardForm) (
 	}
 	base := strings.TrimRight(s.releases().Base, "/") + "/" + f.Tag + "/"
 	prog := func(name string) ops.Program { return ops.Program{URL: base + name, SHA256: sums[name]} }
-	script, err = ops.InstallScript(ops.InstallParams{Unit: "gamec-edge", Host: f.Host, Port: f.Port, Origin: f.Origin, ProxyV2: c.ProxyV2, Secret: secret,
+	script, err = ops.InstallScript(ops.InstallParams{Unit: "gamec-edge", Host: f.Host, Port: f.Port, Origin: f.Origin, Proxy: c.ProxyHeader(), Secret: secret,
 		Edge: prog("edge-linux-amd64"), Gencert: prog("gencert-linux-amd64"), Nodectl: prog("nodectl-linux-amd64"), PubLine: pub, From: f.From})
 	if err != nil {
 		return "", "生成脚本失败：" + err.Error(), http.StatusBadRequest
 	}
-	if c.Origin == "" { // remember the origin for the next node
+	if f.Relay != "" { // the relay must let the new node in before it can reach the origin
+		if _, err := s.syncRelay(r.Context(), f.Relay, f.Host); err != nil {
+			return "", "没能让中转放行这台新节点（" + err.Error() + "）。请先确认中转正常（渠道页的中转列表里点「同步白名单」试试）。", http.StatusBadGateway
+		}
+	}
+	if c.Origin == "" && f.Relay == "" { // remember the origin for the next node
 		s.Store.Mutate(func(st *store.State) error {
 			if x := st.Cluster(c.ID); x != nil && x.Origin == "" {
 				x.Origin = f.Origin
@@ -224,7 +251,7 @@ func (s *Server) wizardCheck(w http.ResponseWriter, r *http.Request, _ *auth.Ses
 	if !ok {
 		return
 	}
-	f, err := readWizardForm(r)
+	f, err := s.readWizard(r, c)
 	d := wizardData{Cluster: c, Form: f, Step: 3}
 	if err != nil {
 		d.Step = 1
@@ -243,7 +270,7 @@ func (s *Server) wizardFinish(w http.ResponseWriter, r *http.Request, _ *auth.Se
 	if !ok {
 		return
 	}
-	f, err := readWizardForm(r)
+	f, err := s.readWizard(r, c)
 	d := wizardData{Cluster: c, Form: f, Step: 3}
 	if err != nil {
 		d.Step = 1
@@ -274,7 +301,7 @@ func (s *Server) wizardFinish(w http.ResponseWriter, r *http.Request, _ *auth.Se
 // message for the channel page.
 func (s *Server) saveWizardNode(r *http.Request, c *store.Cluster, f wizardForm, pin, hostKey, how string) (string, error) {
 	n := &store.Node{ID: store.NewID(), ClusterID: c.ID, Name: f.Name, Host: f.Host, Port: f.Port, Pin: pin, Enabled: true,
-		SSHUser: "gamec-ops", HostKey: hostKey, Created: s.now()}
+		SSHUser: "gamec-ops", HostKey: hostKey, RelayID: f.Relay, Created: s.now()}
 	if f.SSHPort != 22 {
 		n.SSHPort = f.SSHPort
 	}
@@ -290,6 +317,9 @@ func (s *Server) saveWizardNode(r *http.Request, c *store.Cluster, f wizardForm,
 	}
 	s.log(r, "node-add", fmt.Sprintf("cluster=%s node=%s %s pin=%s ssh=%s (%s)", c.ID, safe(n.Name), n.Addr(), pin, hostKey, how), true)
 	go s.Mon.ProbeAll(context.Background(), []*store.Node{n})
+	if n.RelayID != "" { // it was let in before the install; this also tidies up after installs that were abandoned
+		s.syncRelay(r.Context(), n.RelayID)
+	}
 	msg := "节点「" + n.Name + "」已加入，远程管理也开好了。它要连续通过 5 次检查（约 5 分钟）才会进名单"
 	if c.AutoPublish {
 		msg += "，之后自动维护会把它写进名单。"
@@ -334,7 +364,7 @@ func (s *Server) wizardAuto(w http.ResponseWriter, r *http.Request, _ *auth.Sess
 	if !ok {
 		return
 	}
-	f, err := readWizardForm(r)
+	f, err := s.readWizard(r, c)
 	d := wizardData{Cluster: c, Form: f}
 	if err != nil {
 		s.renderWizard(w, r, d, err.Error(), http.StatusBadRequest)

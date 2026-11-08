@@ -99,6 +99,8 @@ func (f *sshFake) run(host, cmd string, stdin io.Reader) (sshx.Result, error) {
 		return sshx.Result{Stdout: `{"unit":"gamec-edge","active":"active"}`}, nil
 	case strings.Contains(cmd, " stop-for "):
 		return sshx.Result{Stdout: "stopped\n"}, nil
+	case strings.Contains(cmd, " relay-allow"):
+		return sshx.Result{Stdout: "ok\n"}, nil
 	}
 	return sshx.Result{Exit: 2, Stderr: "unknown\n"}, nil
 }
@@ -140,7 +142,7 @@ func newSSHEnv(t *testing.T) *sshEnv {
 	rel := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v0.2.0/SHA256SUMS.txt":
-			fmt.Fprintf(w, "%s  edge-linux-amd64\n%s  nodectl-linux-amd64\n%s  gencert-linux-amd64\n", edgeSHA, nodectlSHA, strings.Repeat("c", 64))
+			fmt.Fprintf(w, "%s  edge-linux-amd64\n%s  nodectl-linux-amd64\n%s  gencert-linux-amd64\n%s  realip-linux-amd64\n", edgeSHA, nodectlSHA, strings.Repeat("c", 64), strings.Repeat("d", 64))
 		case "/v0.2.0/edge-linux-amd64":
 			w.Write(edge)
 		case "/v0.2.0/nodectl-linux-amd64":

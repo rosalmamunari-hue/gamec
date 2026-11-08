@@ -8,6 +8,7 @@
 //	gamec-nodectl [-unit U] install -sha256 HEX       install the staged binary, roll back if it does not run
 //	gamec-nodectl [-unit U] rollback
 //	gamec-nodectl version
+//	gamec-nodectl relay-allow IP...                  on a relay: the nodes that may use it (none: nobody)
 //
 // The staged binary is the file the panel uploaded to /var/lib/gamec-ops/incoming/<unit>.edge.new.
 package main
@@ -21,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,7 +32,7 @@ import (
 	"time"
 )
 
-const version = "2"
+const version = "3"
 
 var (
 	unitRe = regexp.MustCompile(`^gamec-edge[a-z0-9-]{0,40}$`)
@@ -318,6 +320,47 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	return out.Close()
 }
 
+// ---------------------------------------------------------------- relay
+
+// RelayDir is where a relay server keeps its program and its allow file (see realip -pass).
+const RelayDir = "/opt/gamec-relay"
+
+const maxRelayAllow = 1000
+
+// relayAllow replaces the relay's allow file with these addresses. Each one must be a plain IP or CIDR.
+// The file is replaced in one step; the relay picks it up within seconds.
+func (e *env) relayAllow(args []string) (int, error) {
+	dir := e.path(RelayDir)
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		return 0, errors.New("this server is not a relay (" + RelayDir + " is missing)")
+	}
+	if len(args) > maxRelayAllow {
+		return 0, fmt.Errorf("at most %d addresses", maxRelayAllow)
+	}
+	var b strings.Builder
+	b.WriteString("# written by gamec-nodectl relay-allow; the panel keeps it in step with the nodes using this relay\n")
+	for _, a := range args {
+		if p, err := netip.ParsePrefix(a); err == nil {
+			b.WriteString(p.Masked().String() + "\n")
+			continue
+		}
+		ip, err := netip.ParseAddr(a)
+		if err != nil || ip.Zone() != "" {
+			return 0, fmt.Errorf("%q is not an IP address or CIDR", a)
+		}
+		b.WriteString(ip.String() + "\n")
+	}
+	tmp := filepath.Join(dir, "allow.new")
+	if err := os.WriteFile(tmp, []byte(b.String()), 0o644); err != nil {
+		return 0, err
+	}
+	if err := os.Rename(tmp, filepath.Join(dir, "allow")); err != nil {
+		os.Remove(tmp)
+		return 0, err
+	}
+	return len(args), nil
+}
+
 // ---------------------------------------------------------------- command line
 
 func (e *env) dispatch(args []string) (int, error) {
@@ -395,6 +438,13 @@ func (e *env) dispatch(args []string) (int, error) {
 			return 1, err
 		}
 		return 0, e.printStatus(*unit)
+	case "relay-allow":
+		n, err := e.relayAllow(cargs)
+		if err != nil {
+			return 1, err
+		}
+		fmt.Fprintf(e.out, "%d address(es) may use this relay\n", n)
+		return 0, nil
 	}
 	return 2, fmt.Errorf("unknown command %q", cmd)
 }

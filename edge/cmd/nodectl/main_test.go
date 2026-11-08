@@ -384,3 +384,38 @@ func TestStartingByHandCancelsTheStopForTimer(t *testing.T) {
 		}
 	}
 }
+
+func TestRelayAllowWritesTheAllowFile(t *testing.T) {
+	e, _, out := newEnv(t)
+	if code, err := e.dispatch([]string{"relay-allow", "203.0.113.9"}); code == 0 || err == nil {
+		t.Fatal("worked on a server that is not a relay")
+	}
+	os.MkdirAll(e.path(RelayDir), 0o755)
+	if code, err := e.dispatch([]string{"relay-allow", "203.0.113.9", "2001:db8::1", "10.1.2.3/16"}); code != 0 || err != nil {
+		t.Fatal(code, err)
+	}
+	got := string(e.read(t, RelayDir+"/allow"))
+	for _, want := range []string{"\n203.0.113.9\n", "\n2001:db8::1\n", "\n10.1.0.0/16\n"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("%q missing from\n%s", want, got)
+		}
+	}
+	if !strings.Contains(out.String(), "3 address(es)") {
+		t.Fatal(out.String())
+	}
+	for _, bad := range []string{"1.2.3", "1.2.3.4;rm", "fe80::1%eth0", "../x"} {
+		if code, _ := e.dispatch([]string{"relay-allow", "203.0.113.9", bad}); code == 0 {
+			t.Fatalf("%q accepted", bad)
+		}
+	}
+	if string(e.read(t, RelayDir+"/allow")) != got {
+		t.Fatal("a refused call changed the file")
+	}
+	// no addresses: nobody may use it
+	if code, err := e.dispatch([]string{"relay-allow"}); code != 0 || err != nil {
+		t.Fatal(code, err)
+	}
+	if strings.Contains(string(e.read(t, RelayDir+"/allow")), "203.0.113.9") {
+		t.Fatal("not emptied")
+	}
+}

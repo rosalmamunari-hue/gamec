@@ -64,6 +64,7 @@ type Cluster struct {
 	Name            string      `json:"name"`
 	Origin          string      `json:"origin"` // where its nodes forward to; informational
 	ProxyV2         bool        `json:"proxy_v2,omitempty"` // nodes start each origin connection with a PROXY v2 header naming the player
+	ProxyV1         bool        `json:"proxy_v1,omitempty"` // the same with a PROXY v1 (text) header
 	Targets         []DNSTarget `json:"targets"`
 	ValidDays       int         `json:"valid_days"`        // how long each signed list is valid
 	RenewBeforeDays int         `json:"renew_before_days"` // re-sign this long before it expires
@@ -73,6 +74,44 @@ type Cluster struct {
 	Notes           string      `json:"notes,omitempty"`
 	Created         time.Time   `json:"created"`
 	Last            Published   `json:"last"`
+}
+
+// ProxyHeader is the header new nodes send the origin: "v1", "v2" or "" (none).
+func (c *Cluster) ProxyHeader() string {
+	switch {
+	case c.ProxyV2:
+		return "v2"
+	case c.ProxyV1:
+		return "v1"
+	}
+	return ""
+}
+
+// Relay is a plain forwarder between some of a cluster's nodes and its origin, for when the nodes cannot (or
+// should not) reach the origin directly:
+//
+//	player -> node -> relay -> origin (or the anti-DDoS front in front of it)
+//
+// It runs realip -pass: connections go on byte for byte, so the node's PROXY header still reaches the origin.
+// Only the nodes that use it may connect; the panel keeps that list on the relay (nodectl relay-allow).
+type Relay struct {
+	ID        string    `json:"id"`
+	ClusterID string    `json:"cluster_id"`
+	Name      string    `json:"name"`
+	Host      string    `json:"host"`
+	Port      int       `json:"port"`   // where the nodes connect
+	Target    string    `json:"target"` // host:port it passes connections to
+	SSHPort   int       `json:"ssh_port,omitempty"`
+	HostKey   string    `json:"host_key,omitempty"` // confirmed SHA256 fingerprint
+	Notes     string    `json:"notes,omitempty"`
+	Created   time.Time `json:"created"`
+}
+
+func (r *Relay) Addr() string { return net.JoinHostPort(r.Host, fmt.Sprint(r.Port)) }
+
+// AsNode is the relay as the SSH management code sees a server: the same restricted account and checks.
+func (r *Relay) AsNode() Node {
+	return Node{ID: r.ID, ClusterID: r.ClusterID, Name: r.Name, Host: r.Host, Port: r.Port, SSHUser: "gamec-ops", SSHPort: r.SSHPort, HostKey: r.HostKey}
 }
 
 type Node struct {
@@ -88,6 +127,7 @@ type Node struct {
 	SSHPort       int       `json:"ssh_port,omitempty"`       // 0 means 22
 	Unit          string    `json:"unit,omitempty"`           // systemd unit of the edge service; empty means gamec-edge
 	HostKey       string    `json:"host_key,omitempty"`       // SHA256 fingerprint an administrator confirmed
+	RelayID       string    `json:"relay_id,omitempty"`       // the relay it forwards through; empty: straight to the origin
 	Notes         string    `json:"notes,omitempty"`
 	Created       time.Time `json:"created"`
 }
@@ -135,6 +175,7 @@ type Alerts struct {
 type State struct {
 	Clusters []*Cluster `json:"clusters"`
 	Nodes    []*Node    `json:"nodes"`
+	Relays   []*Relay   `json:"relays,omitempty"`
 	Egress   *Egress    `json:"egress,omitempty"`
 	Alerts   *Alerts    `json:"alerts,omitempty"`
 }
@@ -155,6 +196,38 @@ func (s State) Node(id string) *Node {
 		}
 	}
 	return nil
+}
+
+func (s State) Relay(id string) *Relay {
+	for _, r := range s.Relays {
+		if r.ID == id {
+			return r
+		}
+	}
+	return nil
+}
+
+func (s State) RelaysOf(clusterID string) []*Relay {
+	var out []*Relay
+	for _, r := range s.Relays {
+		if r.ClusterID == clusterID {
+			out = append(out, r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// NodesVia is the nodes that forward through a relay.
+func (s State) NodesVia(relayID string) []*Node {
+	var out []*Node
+	for _, n := range s.Nodes {
+		if relayID != "" && n.RelayID == relayID {
+			out = append(out, n)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }
 
 func (s State) NodesOf(clusterID string) []*Node {
@@ -226,6 +299,9 @@ func (s State) Validate() error {
 		names[c.Name] = true
 		if c.ValidDays < 2 || c.ValidDays > 90 {
 			return fmt.Errorf("cluster %q: valid days must be 2-90", c.Name)
+		}
+		if c.ProxyV1 && c.ProxyV2 {
+			return fmt.Errorf("cluster %q: pick one PROXY header version", c.Name)
 		}
 		if c.RenewBeforeDays < 1 || c.RenewBeforeDays >= c.ValidDays {
 			return fmt.Errorf("cluster %q: renew-before must be at least 1 and less than the validity", c.Name)
@@ -312,6 +388,41 @@ func (s State) Validate() error {
 			return fmt.Errorf("%s is listed twice; a node address belongs to one cluster only", n.Addr())
 		}
 		addrs[n.Addr()] = true
+		if n.RelayID != "" {
+			if r := s.Relay(n.RelayID); r == nil || r.ClusterID != n.ClusterID {
+				return fmt.Errorf("node %q forwards through a relay that is not in its cluster", n.Name)
+			}
+		}
+	}
+	for _, r := range s.Relays {
+		if !idRe.MatchString(r.ID) || nodeIDs[r.ID] {
+			return fmt.Errorf("relay %q: bad or duplicate id", r.Name)
+		}
+		nodeIDs[r.ID] = true
+		if s.Cluster(r.ClusterID) == nil {
+			return fmt.Errorf("relay %q belongs to a cluster that does not exist", r.Name)
+		}
+		if strings.TrimSpace(r.Name) == "" || len(r.Name) > 60 {
+			return errors.New("relay name must be 1-60 characters")
+		}
+		if net.ParseIP(r.Host) == nil {
+			return fmt.Errorf("relay %q: %q is not an IP address", r.Name, r.Host)
+		}
+		if r.Port < 1 || r.Port > 65535 || r.SSHPort < 0 || r.SSHPort > 65535 {
+			return fmt.Errorf("relay %q: port out of range", r.Name)
+		}
+		host, port, err := net.SplitHostPort(r.Target)
+		p, perr := strconv.Atoi(port)
+		if err != nil || perr != nil || p < 1 || p > 65535 || !validHost(host) {
+			return fmt.Errorf("relay %q: the target %q is not host:port", r.Name, r.Target)
+		}
+		if r.HostKey != "" && !hostKeyRe.MatchString(r.HostKey) {
+			return fmt.Errorf("relay %q: the host key fingerprint is not valid", r.Name)
+		}
+		if addrs[r.Addr()] {
+			return fmt.Errorf("%s is used twice", r.Addr())
+		}
+		addrs[r.Addr()] = true
 	}
 	return nil
 }

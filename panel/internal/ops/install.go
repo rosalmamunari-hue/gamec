@@ -29,7 +29,7 @@ type InstallParams struct {
 	Host    string // the node's public IP or name, for its certificate
 	Port    int    // where players connect
 	Origin  string // host:port of the game server the node forwards to
-	ProxyV2 bool   // tell the origin each player's address in a PROXY v2 header
+	Proxy   string // tell the origin each player's address in a PROXY header: "v1", "v2" or "" (no header)
 	Secret  string // the cluster's token secret (64 hex characters)
 	Edge    Program
 	Gencert Program
@@ -71,6 +71,8 @@ func InstallScript(p InstallParams) (string, error) {
 		return "", fmt.Errorf("the origin %q is not host:port", p.Origin)
 	case !secretRe.MatchString(p.Secret):
 		return "", errors.New("the cluster secret is not 64 hex characters")
+	case p.Proxy != "" && p.Proxy != "v1" && p.Proxy != "v2":
+		return "", errors.New("the PROXY header must be v1, v2 or none")
 	}
 	for _, prog := range []Program{p.Edge, p.Gencert} {
 		if !urlRe.MatchString(prog.URL) || !shaRe.MatchString(prog.SHA256) {
@@ -83,8 +85,8 @@ func InstallScript(p InstallParams) (string, error) {
 	}
 	dir := "/opt/" + p.Unit
 	proxy := ""
-	if p.ProxyV2 {
-		proxy = " -proxy-v2"
+	if p.Proxy != "" {
+		proxy = " -proxy-" + p.Proxy
 	}
 	r := strings.NewReplacer("@UNIT@", p.Unit, "@DIR@", dir, "@HOST@", p.Host, "@PORT@", strconv.Itoa(p.Port),
 		"@ORIGIN@", p.Origin, "@PROXY@", proxy, "@SECRET@", p.Secret,

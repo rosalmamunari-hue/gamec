@@ -39,7 +39,14 @@ func (s *Server) clusterEdit(w http.ResponseWriter, r *http.Request, _ *auth.Ses
 	origin := strings.TrimSpace(r.FormValue("origin"))
 	valid, err1 := strconv.Atoi(r.FormValue("valid_days"))
 	renew, err2 := strconv.Atoi(r.FormValue("renew_days"))
-	proxyV2 := r.FormValue("proxy_v2") == "on"
+	proxy := r.FormValue("proxy")
+	if proxy == "" && r.FormValue("proxy_v2") == "on" { // the old checkbox
+		proxy = "v2"
+	}
+	if proxy == "none" {
+		proxy = ""
+	}
+	proxyV1, proxyV2 := proxy == "v1", proxy == "v2"
 	fail := func(msg string) { s.renderCluster(w, r, id, "", msg, http.StatusBadRequest) }
 	switch {
 	case !clusterNameRe.MatchString(name):
@@ -66,13 +73,14 @@ func (s *Server) clusterEdit(w http.ResponseWriter, r *http.Request, _ *auth.Ses
 		}
 		originChanged = c.Origin != origin
 		c.Name, c.Origin, c.ValidDays, c.RenewBeforeDays, c.ProxyV2 = name, origin, valid, renew, proxyV2
+		c.ProxyV1 = proxyV1
 		return nil
 	})
 	if err != nil {
 		fail(friendlyStoreError(err))
 		return
 	}
-	s.log(r, "cluster-edit", fmt.Sprintf("cluster=%s name=%s origin=%s proxy_v2=%v valid=%d renew=%d", id, safe(name), safe(origin), proxyV2, valid, renew), true)
+	s.log(r, "cluster-edit", fmt.Sprintf("cluster=%s name=%s origin=%s proxy=%q valid=%d renew=%d", id, safe(name), safe(origin), proxy, valid, renew), true)
 	if originChanged && origin != "" {
 		if c := s.Store.Snapshot().Cluster(id); c != nil {
 			go s.checkOrigin(context.Background(), c)
@@ -171,6 +179,11 @@ func (s *Server) nodeEdit(w http.ResponseWriter, r *http.Request, _ *auth.Sessio
 	if moved {
 		msg += "地址或指纹变了：它要重新连续通过 5 次检查才会进名单，之后自动维护会更新名单。"
 	}
+	if n.RelayID != "" && n.Host != host { // the relay must let the new address in, and the old one no more
+		if _, err := s.syncRelay(r.Context(), n.RelayID); err != nil {
+			msg += " 没能更新它所用中转的白名单（" + err.Error() + "），请在渠道页的中转列表里点「同步白名单」。"
+		}
+	}
 	http.Redirect(w, r, "/cluster/"+c.ID+"/node/"+n.ID+"?ok="+url.QueryEscape(msg), http.StatusSeeOther)
 }
 
@@ -178,6 +191,8 @@ func (s *Server) nodeEdit(w http.ResponseWriter, r *http.Request, _ *auth.Sessio
 func friendlyStoreError(err error) string {
 	m := err.Error()
 	switch {
+	case strings.Contains(m, "is used twice"):
+		return "这个地址和端口已经被另一个节点或中转用了。"
 	case strings.Contains(m, "is listed twice"):
 		return "这个地址和端口已经被另一个节点用了（一个地址只能属于一个渠道）。"
 	case strings.Contains(m, "the pin must be"):

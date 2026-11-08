@@ -1,0 +1,58 @@
+{{template "head" .}}
+{{$p := .}}
+{{$d := .Data}}
+{{$c := $d.Cluster}}
+{{$f := $d.Form}}
+
+<div class="row row-cards">
+<div class="col-lg-8">
+{{if not $d.Ready}}<div class="alert alert-warning">{{icon "alert-triangle"}} {{$d.Missing}}</div>{{end}}
+<form method="post" action="/cluster/{{$c.ID}}/relay/new" class="card">
+  <input type="hidden" name="csrf" value="{{$p.CSRF}}">
+  <div class="card-header"><div><h3 class="card-title">新中转</h3>
+    <div class="card-subtitle">玩家 → 节点 → <b>中转</b> → 源站。准备一台全新的 Linux 服务器（Ubuntu / Debian 都行），填好下面几项，面板会登录上去装好。</div></div></div>
+  <div class="card-body">
+    <div class="row">
+      <div class="col-md-6 mb-3"><label class="form-label required" for="r-host">中转机公网 IP</label><input class="form-control mono" id="r-host" name="host" value="{{$f.Host}}" placeholder="203.0.113.30" required autofocus></div>
+      <div class="col-md-6 mb-3"><label class="form-label required" for="r-name">给它起个名字</label><input class="form-control" id="r-name" name="name" value="{{$f.Name}}" required><div class="form-hint">方便你认，比如 hk-relay。</div></div>
+      <div class="col-md-6 mb-3"><label class="form-label required" for="r-port">节点连它的端口</label><input class="form-control" id="r-port" name="port" type="number" min="1024" max="65535" value="{{$f.Port}}" required>
+        <div class="form-hint">已经随机选好了。<b>记得在云服务商的安全组里放行这个端口（TCP）。</b>只有经过它的节点能连，其他来源一律拒绝。</div></div>
+      <div class="col-md-6 mb-3"><label class="form-label required" for="r-target">转发到</label><input class="form-control mono" id="r-target" name="target" value="{{$f.Target}}" placeholder="203.0.113.5:21443" required>
+        <div class="form-hint">一般就是渠道的源站地址（高防的 IP:端口）{{if $c.Origin}}，已经填好了{{end}}。中转原样转发，节点加的 PROXY 头会一直送到源站。</div></div>
+      <div class="col-md-6 mb-3"><label class="form-label required" for="r-pw">root 密码</label><input class="form-control" id="r-pw" name="password" type="password" autocomplete="new-password" required>
+        <div class="form-hint">面板用它登录一次来安装，<b>不保存、不记日志</b>，装完就可以改掉。之后面板用自己的 SSH 密钥管理它。</div></div>
+    </div>
+    <div class="accordion" id="r-more">
+      <div class="accordion-item">
+        <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#r-more-body" aria-expanded="false">高级选项（一般不用改）</button></h2>
+        <div id="r-more-body" class="accordion-collapse collapse" data-bs-parent="#r-more">
+          <div class="accordion-body">
+            <div class="row">
+              <div class="col-md-4 mb-3"><label class="form-label" for="r-ssh">SSH 端口</label><input class="form-control" id="r-ssh" name="ssh_port" type="number" value="{{$f.SSHPort}}" required></div>
+              <div class="col-md-4 mb-3"><label class="form-label" for="r-tag">程序版本</label><input class="form-control" id="r-tag" name="tag" value="{{$f.Tag}}" placeholder="v0.5.5" required><div class="form-hint">要 v0.5.5 或更新。</div></div>
+              <div class="col-md-4 mb-3"><label class="form-label" for="r-from">只允许从这个地址管理</label><input class="form-control mono" id="r-from" name="from" value="{{$f.From}}" placeholder="面板的 IP"><div class="form-hint">建议填面板服务器的 IP（用了出口中转就填出口中转的 IP，已自动填好）。</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="card-footer d-flex justify-content-end">
+    <button class="btn btn-primary"{{if not $d.Ready}} disabled{{end}} data-busy="正在安装，大约 1 分钟…">{{icon "rocket"}}一键安装</button>
+  </div>
+</form>
+</div>
+<div class="col-lg-4">
+<div class="card">
+  <div class="card-header"><h3 class="card-title">装好以后</h3></div>
+  <div class="card-body small">
+    <ol class="mb-0 ps-3">
+      <li class="mb-2">回到渠道页点「加节点」，在「节点把流量转到」里选这个中转。</li>
+      <li class="mb-2">面板会先让中转放行新节点的 IP，再装节点。</li>
+      <li>删除节点时，面板也会自动把它从中转的白名单里去掉。</li>
+    </ol>
+  </div>
+</div>
+</div>
+</div>
+{{template "foot" .}}

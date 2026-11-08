@@ -143,9 +143,16 @@ func TestTheClusterCanTellTheOriginThePlayer(t *testing.T) {
 	if !e.st.Snapshot().Cluster(cl.ID).ProxyV2 {
 		t.Fatal("not saved")
 	}
-	if _, body, _ := c.get("/cluster/" + cl.ID); !strings.Contains(body, `name="proxy_v2" checked`) {
-		t.Fatal("the box is not shown ticked")
+	if _, body, _ := c.get("/cluster/" + cl.ID); !strings.Contains(body, `<option value="v2" selected>`) {
+		t.Fatal("v2 is not shown chosen")
 	}
+	form.Del("proxy_v2")
+	form.Set("proxy", "v1")
+	c.post("/cluster/"+cl.ID+"/edit", form, nil)
+	if x := e.st.Snapshot().Cluster(cl.ID); !x.ProxyV1 || x.ProxyV2 || x.ProxyHeader() != "v1" {
+		t.Fatal("v1 not saved")
+	}
+	form.Set("proxy", "none")
 	form.Del("proxy_v2")
 	c.post("/cluster/"+cl.ID+"/edit", form, nil)
 	if e.st.Snapshot().Cluster(cl.ID).ProxyV2 {

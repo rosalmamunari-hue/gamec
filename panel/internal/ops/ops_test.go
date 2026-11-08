@@ -102,6 +102,8 @@ func (f *fakeNode) Run(ctx context.Context, cmd string, stdin io.Reader) (sshx.R
 	case strings.Contains(cmd, " stop-for "):
 		f.active = "inactive"
 		return sshx.Result{Stdout: "stopped\n"}, nil
+	case strings.Contains(cmd, " relay-allow"):
+		return sshx.Result{Stdout: "ok\n"}, nil
 	}
 	return sshx.Result{Exit: 2, Stderr: "unknown command\n"}, nil
 }

@@ -85,6 +85,7 @@
       <tr>
         <td class="text-nowrap">{{template "status" .}}</td>
         <td><a href="/cluster/{{$c.ID}}/node/{{$n.ID}}" class="text-reset fw-bold">{{$n.Name}}</a>
+          {{with $n.RelayID}}<div class="small text-secondary">{{icon "arrow-right"}} 经中转「{{index $p.Data.RelayNames .}}」</div>{{end}}
           <div class="d-md-none mono small text-secondary">{{$n.Host}}:{{$n.Port}}</div>
           {{if ne .Status "ok"}}<div class="d-lg-none small text-secondary">{{.Detail}}</div>{{end}}</td>
         <td class="mono d-none d-md-table-cell">{{$n.Host}}:{{$n.Port}}</td>
@@ -139,6 +140,44 @@
   </div>
   {{end}}
 </div>
+
+{{/* ---------------------------------------------------------------- relays */}}
+{{if or .Data.Relays $p.Admin}}
+<div class="card mb-3" id="relays">
+  <div class="card-header">
+    <div>
+      <h3 class="card-title">中转</h3>
+      <div class="card-subtitle">节点不直连源站时用：玩家 → 节点 → 中转 → 源站。中转只原样转发，只放行用它的节点。</div>
+    </div>
+    {{if $p.Admin}}<div class="card-actions"><a href="/cluster/{{$c.ID}}/relay/new" class="btn">{{icon "plus"}}加中转</a></div>{{end}}
+  </div>
+  {{if .Data.Relays}}
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table">
+      <thead><tr><th>名称</th><th>地址</th><th class="d-none d-md-table-cell">转发到</th><th>经过它的节点</th>{{if $p.Admin}}<th class="w-1"></th>{{end}}</tr></thead>
+      <tbody>
+      {{range .Data.Relays}}
+      <tr>
+        <td class="fw-bold">{{.R.Name}}</td>
+        <td class="mono">{{.R.Host}}:{{.R.Port}}</td>
+        <td class="mono d-none d-md-table-cell">{{.R.Target}}</td>
+        <td>{{if .Nodes}}{{range $i, $n := .Nodes}}{{if $i}}、{{end}}{{$n.Name}}{{end}}{{else}}<span class="text-secondary">还没有</span>{{end}}</td>
+        {{if $p.Admin}}
+        <td class="text-nowrap"><div class="btn-list flex-nowrap">
+          <form method="post" action="/cluster/{{$c.ID}}/relay/{{.R.ID}}/sync"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button class="btn btn-sm" data-busy="同步中…" title="把经过它的节点 IP 重新写进中转的白名单">同步白名单</button></form>
+          {{if not .Nodes}}<form method="post" action="/cluster/{{$c.ID}}/relay/{{.R.ID}}/delete" data-confirm="从面板删除中转「{{.R.Name}}」（{{.R.Host}}:{{.R.Port}}）。" data-confirm-ok="删除"><input type="hidden" name="csrf" value="{{$p.CSRF}}"><button class="btn btn-sm btn-ghost-danger">删除</button></form>{{end}}
+        </div></td>
+        {{end}}
+      </tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="card-body text-secondary small">还没有中转。节点都直连源站的话不需要。</div>
+  {{end}}
+</div>
+{{end}}
 
 <div class="row row-deck row-cards mb-3">
 {{/* ---------------------------------------------------------------- the list */}}
@@ -265,9 +304,13 @@
         <div class="mb-3"><label class="form-label" for="c-origin">源站地址</label>
           <input class="form-control mono" id="c-origin" name="origin" value="{{$c.Origin}}" placeholder="203.0.113.5:10443">
           <div class="form-hint">节点最后把玩家的流量转到这里（游戏服务器的 IP:端口）。加节点向导会用它。</div></div>
-        <div class="mb-3"><label class="form-check"><input class="form-check-input" type="checkbox" name="proxy_v2"{{if $c.ProxyV2}} checked{{end}}>
-          <span class="form-check-label">告诉源站玩家的真实 IP（PROXY v2 头）</span></label>
-          <div class="form-hint">节点连源站时先发一个 PROXY v2 头，写上玩家的 IP。<b>源站必须认这个头，否则所有连接都会断。</b>源站前面还有高防、而高防也加了自己的头的话，要在源站上先装好 realip。加节点向导装的新节点会带上这个参数；已有的节点要手动在启动参数里加 <span class="mono">-proxy-v2</span>，然后重启（节点程序要 v0.5.1 以上）。</div></div>
+        <div class="mb-3"><label class="form-label" for="c-proxy">告诉源站玩家的真实 IP</label>
+          <select class="form-select" id="c-proxy" name="proxy">
+            <option value="none"{{if eq $c.ProxyHeader ""}} selected{{end}}>不告诉（源站看到的是节点的 IP）</option>
+            <option value="v1"{{if eq $c.ProxyHeader "v1"}} selected{{end}}>PROXY v1 头（文本）</option>
+            <option value="v2"{{if eq $c.ProxyHeader "v2"}} selected{{end}}>PROXY v2 头（二进制）</option>
+          </select>
+          <div class="form-hint">节点连源站时先发一个 PROXY 头，写上玩家的 IP。<b>源站（或源站上的 realip）必须认这个头，否则所有连接都会断。</b>加节点向导装的新节点会带上对应参数（<span class="mono">-proxy-v1</span> 或 <span class="mono">-proxy-v2</span>）；已有的节点不会自动改。经中转的节点也一样：中转原样转发，头会一直送到源站。</div></div>
         <div class="row">
           <div class="col-6 mb-3"><label class="form-label" for="c-valid">名单有效几天</label><input class="form-control" id="c-valid" name="valid_days" type="number" min="2" max="90" value="{{$c.ValidDays}}" required></div>
           <div class="col-6 mb-3"><label class="form-label" for="c-renew">到期前几天续期</label><input class="form-control" id="c-renew" name="renew_days" type="number" min="1" max="89" value="{{$c.RenewBeforeDays}}" required></div>
@@ -277,7 +320,7 @@
       {{else}}
       <dl class="row mb-0">
         <dt class="col-5 text-secondary fw-normal">源站</dt><dd class="col-7 mono">{{if $c.Origin}}{{$c.Origin}}{{else}}—{{end}}</dd>
-        <dt class="col-5 text-secondary fw-normal">玩家真实 IP</dt><dd class="col-7">{{if $c.ProxyV2}}用 PROXY v2 头告诉源站{{else}}不告诉源站{{end}}</dd>
+        <dt class="col-5 text-secondary fw-normal">玩家真实 IP</dt><dd class="col-7">{{with $c.ProxyHeader}}用 PROXY {{.}} 头告诉源站{{else}}不告诉源站{{end}}</dd>
         <dt class="col-5 text-secondary fw-normal">名单有效期</dt><dd class="col-7">{{$c.ValidDays}} 天，到期前 {{$c.RenewBeforeDays}} 天续期</dd>
       </dl>
       {{end}}

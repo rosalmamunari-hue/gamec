@@ -16,7 +16,7 @@
 
 {{define "wizard-hidden"}}
 <input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="host" value="{{.Host}}"><input type="hidden" name="port" value="{{.Port}}">
-<input type="hidden" name="ssh_port" value="{{.SSHPort}}"><input type="hidden" name="tag" value="{{.Tag}}"><input type="hidden" name="origin" value="{{.Origin}}"><input type="hidden" name="from" value="{{.From}}">
+<input type="hidden" name="ssh_port" value="{{.SSHPort}}"><input type="hidden" name="tag" value="{{.Tag}}"><input type="hidden" name="origin" value="{{.Origin}}"><input type="hidden" name="from" value="{{.From}}"><input type="hidden" name="relay" value="{{.Relay}}">
 {{end}}
 
 {{if eq $d.Step 1}}
@@ -32,8 +32,16 @@
       <div class="col-md-6 mb-3"><label class="form-label required" for="w-name">给它起个名字</label><input class="form-control" id="w-name" name="name" value="{{$f.Name}}" required><div class="form-hint">方便你认，比如 hk-3。</div></div>
       <div class="col-md-6 mb-3"><label class="form-label required" for="w-port">玩家连接的端口</label><input class="form-control" id="w-port" name="port" type="number" min="1024" max="65535" value="{{$f.Port}}" required>
         <div class="form-hint">已经帮你随机选好了。<b>记得在云服务商的安全组里放行这个端口（TCP）。</b></div></div>
-      <div class="col-md-6 mb-3"><label class="form-label required" for="w-origin">源站地址</label><input class="form-control mono" id="w-origin" name="origin" value="{{$f.Origin}}" placeholder="203.0.113.50:10443" required>
-        <div class="form-hint">游戏服务器的 IP:端口。{{if $c.Origin}}已经按渠道设置填好了。{{else}}会顺便存进渠道设置。{{end}}</div></div>
+      {{if $d.Relays}}
+      <div class="col-md-6 mb-3"><label class="form-label" for="w-relay">节点把流量转到</label>
+        <select class="form-select" id="w-relay" name="relay">
+          <option value=""{{if not $f.Relay}} selected{{end}}>直接连源站（下面填的地址）</option>
+          {{range $d.Relays}}<option value="{{.ID}}"{{if eq $f.Relay .ID}} selected{{end}}>经中转「{{.Name}}」（{{.Host}}:{{.Port}} → {{.Target}}）</option>{{end}}
+        </select>
+        <div class="form-hint">选了中转，节点就连中转，由中转转给源站；面板会自动让中转放行这台节点。</div></div>
+      {{end}}
+      <div class="col-md-6 mb-3"><label class="form-label{{if not $d.Relays}} required{{end}}" for="w-origin">源站地址</label><input class="form-control mono" id="w-origin" name="origin" value="{{if not $f.Relay}}{{$f.Origin}}{{else}}{{$c.Origin}}{{end}}" placeholder="203.0.113.50:10443"{{if not $d.Relays}} required{{end}}>
+        <div class="form-hint">游戏服务器的 IP:端口。{{if $c.Origin}}已经按渠道设置填好了。{{else}}会顺便存进渠道设置。{{end}}{{if $d.Relays}}经中转时不用管这一栏。{{end}}</div></div>
       <div class="col-md-6 mb-3"><label class="form-label" for="w-pw">root 密码（一键安装用）</label><input class="form-control" id="w-pw" name="password" type="password" autocomplete="new-password">
         <div class="form-hint">填了就点「一键安装」：面板用这个密码登录一次，装好后自动加入，<b>密码不保存、不记日志</b>，装完就可以改掉。不填就点「生成脚本」自己运行。</div></div>
     </div>
