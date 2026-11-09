@@ -69,6 +69,9 @@ func (c *counters) snapshot(now time.Time) shieldclient.NodeStats {
 		BytesUp: c.bytesUp.Load(), BytesDown: c.bytesDown.Load(),
 		Refused: map[string]uint64{},
 	}
+	if upstreams != nil {
+		st.Origins = upstreams.State()
+	}
 	c.mu.Lock()
 	for k, v := range c.refused {
 		st.Refused[k] = v

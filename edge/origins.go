@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"gamec/edge/shieldclient"
 )
 
 // -origin may list several addresses, best first (the anti-DDoS front, then a backup line). A connection goes
@@ -29,6 +31,11 @@ type upstream struct {
 	trying   bool      // one connection is finding out whether it is back
 	wasDown  bool
 	lastWarn time.Time
+	downFrom time.Time
+	used     uint64
+	total    uint64 // failed tries since start
+	lastFail time.Time
+	lastErr  string
 }
 
 type origins struct {
@@ -102,7 +109,8 @@ func (o *origins) ok(u *upstream) {
 	if u.wasDown {
 		o.logf("origin %s is answering again (after %d failed tries)", u.addr, u.fails)
 	}
-	u.fails, u.trying, u.wasDown = 0, false, false
+	u.fails, u.trying, u.wasDown, u.downFrom = 0, false, false, time.Time{}
+	u.used++
 }
 
 func (o *origins) failed(u *upstream, err error, next bool) {
@@ -111,6 +119,11 @@ func (o *origins) failed(u *upstream, err error, next bool) {
 	now := o.now()
 	u.fails++
 	u.trying = false
+	u.total++
+	u.lastFail, u.lastErr = now, err.Error()
+	if u.downFrom.IsZero() {
+		u.downFrom = now
+	}
 	rest := *originRest
 	for i := 1; i < u.fails && rest < *originRestMax; i++ {
 		rest *= 2
@@ -126,6 +139,24 @@ func (o *origins) failed(u *upstream, err error, next bool) {
 		o.logf("origin dial: %v (%s; %s)", err, u.addr, then)
 	}
 	u.wasDown = true
+}
+
+// State reports each address for the node's stats.
+func (o *origins) State() []shieldclient.OriginState {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	out := make([]shieldclient.OriginState, len(o.list))
+	for i, u := range o.list {
+		st := shieldclient.OriginState{Addr: u.addr, Up: u.fails == 0, Used: u.used, Fails: u.total, LastErr: u.lastErr}
+		if !u.lastFail.IsZero() {
+			st.LastFail = u.lastFail.Unix()
+		}
+		if !u.downFrom.IsZero() {
+			st.DownFrom = u.downFrom.Unix()
+		}
+		out[i] = st
+	}
+	return out
 }
 
 // Dial connects to the best origin that answers.

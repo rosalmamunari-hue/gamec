@@ -46,6 +46,20 @@ type NodeStats struct {
 
 	// Top lists the client addresses holding the most relays now, most first.
 	Top []IPLoad `json:"top,omitempty"`
+
+	// Origins is the state of each -origin address, best first (nodes from v0.5.6 on).
+	Origins []OriginState `json:"origins,omitempty"`
+}
+
+// OriginState is one -origin address as the node sees it.
+type OriginState struct {
+	Addr     string `json:"addr"`
+	Up       bool   `json:"up"`                  // the last try answered (or none was made yet)
+	Used     uint64 `json:"used"`                // relays sent through it
+	Fails    uint64 `json:"fails"`               // tries that did not answer
+	LastFail int64  `json:"last_fail,omitempty"` // unix time of the last of them
+	LastErr  string `json:"last_err,omitempty"`
+	DownFrom int64  `json:"down_from,omitempty"` // unix time it stopped answering, while it is down
 }
 
 type IPLoad struct {

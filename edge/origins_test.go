@@ -122,6 +122,10 @@ func TestTheNodeMovesToTheBackupAndBack(t *testing.T) {
 	if a := dialFrom(t, o); a != "gcore:1" {
 		t.Fatal(a)
 	}
+	st := o.State()
+	if len(st) != 2 || !st[0].Up || st[0].Fails != 2 || st[0].Used != 3 || st[0].DownFrom != 0 || st[0].LastErr == "" || st[1].Used != 8 {
+		t.Fatalf("the state the node reports is wrong: %+v", st)
+	}
 	f.mu.Lock()
 	logs := strings.Join(f.logs, "\n")
 	f.mu.Unlock()
@@ -150,6 +154,9 @@ func TestWithEveryLineDownAllAreStillTried(t *testing.T) {
 		t.Fatal("no error")
 	}
 	f.take()
+	if st := o.State(); st[0].Up || st[0].DownFrom == 0 || st[1].Up {
+		t.Fatalf("down addresses are not reported: %+v", st)
+	}
 	f.set("b:2", false) // both resting, b is back: the player still gets through
 	if a := dialFrom(t, o); a != "b:2" {
 		t.Fatal(a)
