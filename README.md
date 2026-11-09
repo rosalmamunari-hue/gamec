@@ -53,6 +53,11 @@ runs it on a throwaway key for local tests). Useful flags: `-max-per-ip` (per /6
 `-idle-timeout` (default 10m: a relay with no data either way for that long is closed; raise it if your game
 can sit silent longer, 0 = never), `-token-ip-limit`, `-token-device-limit`, `-banned <file of device ids>`.
 The same secret must be on every node.
+`-origin` takes several addresses, best first (`-origin 203.0.113.5:21443,198.51.100.7:21444`: the anti-DDoS
+front, then a backup line). A connection goes to the first that answers within `-origin-timeout` (3s); one that
+does not is skipped for `-origin-rest` (10s, doubling while it keeps failing, up to `-origin-rest-max`, 1m), then
+one connection tries it again, so the node returns to it by itself. Connections already open when a line fails
+are closed; the app reconnects and is sent down the next line.
 **Make the origin accept connections from the nodes only**, otherwise nothing is hidden.
 
 ## Publishing the node list

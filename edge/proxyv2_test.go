@@ -42,6 +42,7 @@ func TestProxyV2NamesThePlayerToTheOrigin(t *testing.T) {
 	addr := startEdge(t)
 	o, got := startHeaderOrigin(t)
 	*origin = o
+	upstreams, _ = parseOrigins(*origin)
 	*proxyV2 = true
 	defer func() { *proxyV2 = false }()
 
@@ -79,6 +80,7 @@ func TestProxyV1NamesThePlayerToTheOrigin(t *testing.T) {
 		r.WriteTo(c)
 	}()
 	*origin = ln.Addr().String()
+	upstreams, _ = parseOrigins(*origin)
 	*proxyV1 = true
 	defer func() { *proxyV1 = false }()
 	c := dial(t, addr, MakeToken("test-secret", "dev", time.Now()))

@@ -30,6 +30,7 @@ func startEcho(t *testing.T) string {
 
 func startEdge(t *testing.T) string {
 	*origin = startEcho(t)
+	upstreams, _ = parseOrigins(*origin)
 	*secret = "test-secret"
 	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{
 		Certificates: []tls.Certificate{selfSigned()},

@@ -16,6 +16,7 @@ import (
 func startEdgePinned(t *testing.T) (addr, pin string) {
 	t.Helper()
 	*origin = startEcho(t)
+	upstreams, _ = parseOrigins(*origin)
 	*secret = "test-secret"
 	cert := selfSigned()
 	leaf, err := x509.ParseCertificate(cert.Certificate[0])

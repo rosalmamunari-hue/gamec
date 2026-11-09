@@ -33,7 +33,7 @@ import (
 
 var (
 	listen     = flag.String("listen", ":30800", "listen address")
-	origin     = flag.String("origin", "127.0.0.1:9000", "hidden origin address")
+	origin     = flag.String("origin", "127.0.0.1:9000", "hidden origin address; several, comma separated, best first: the next is used while one does not answer")
 	secret     = flag.String("secret", "", "token HMAC secret (visible to local users in the process list: prefer -secret-file)")
 	secretFile = flag.String("secret-file", "", "file holding the token HMAC secret")
 	certFile   = flag.String("cert", "", "TLS cert (PEM)")
@@ -48,6 +48,8 @@ var (
 )
 
 const minSecretLen = 16
+
+var upstreams *origins // from -origin
 
 // limitKey is what the per-IP limits count: the address, or for IPv6 its /64, since one host usually holds a
 // whole /64 and could otherwise get around the limits by changing address.
@@ -187,10 +189,9 @@ func handle(c net.Conn, lim *limiter) {
 	}
 	c.SetReadDeadline(time.Time{})
 
-	up, err := net.DialTimeout("tcp", *origin, 3*time.Second)
+	up, _, err := upstreams.Dial()
 	if err != nil {
 		stats.refuse("origin")
-		log.Printf("origin dial: %v", err)
 		return
 	}
 	defer up.Close()
@@ -286,6 +287,9 @@ func main() {
 		log.Fatal(err)
 	}
 	*secret = s
+	if upstreams, err = parseOrigins(*origin); err != nil {
+		log.Fatal(err)
+	}
 	var cert tls.Certificate
 	switch {
 	case *certFile != "":
@@ -305,7 +309,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println("edge listening on", *listen, "-> origin", *origin)
+	fmt.Println("edge listening on", *listen, "-> origin", upstreams)
 	if len(allowed) > 0 {
 		fmt.Println("exempt from the per-address limits:", *allowIPs)
 	}
