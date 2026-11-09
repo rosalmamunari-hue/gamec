@@ -105,25 +105,26 @@ func (s *Server) now() time.Time {
 func (s *Server) init() {
 	s.once.Do(func() {
 		funcs := template.FuncMap{
-			"ago":          func(t time.Time) string { return humanAgo(s.now(), t) },
-			"until":        func(unix int64) string { return humanUntil(s.now(), unix) },
-			"ms":           func(d time.Duration) string { return fmt.Sprintf("%d ms", d.Milliseconds()) },
-			"ts":           showTime,
-			"clock":        showClock,
-			"zone":         func() string { return zoneLabel },
-			"unixTime":     func(u int64) time.Time { return time.Unix(u, 0) },
-			"list":         func(v ...string) []string { return v },
-			"icon":         icon,
-			"hasPrefix":    strings.HasPrefix,
-			"statusColor":  statusColor,
-			"statusWord":   statusWord,
-			"actionWord":   actionWord,
-			"add":          func(a, b int) int { return a + b },
-			"levelColor":   levelColor,
-			"providerName": providerName,
-			"daysLeft":     func(exp int64) int { return daysLeft(s.now(), exp) },
-			"dict":         dict,
-			"pct":          func(a, b int) int { return a * 100 / max(b, 1) },
+			"ago":             func(t time.Time) string { return humanAgo(s.now(), t) },
+			"until":           func(unix int64) string { return humanUntil(s.now(), unix) },
+			"ms":              func(d time.Duration) string { return fmt.Sprintf("%d ms", d.Milliseconds()) },
+			"ts":              showTime,
+			"clock":           showClock,
+			"friendlyDialErr": friendlyDialErr,
+			"zone":            func() string { return zoneLabel },
+			"unixTime":        func(u int64) time.Time { return time.Unix(u, 0) },
+			"list":            func(v ...string) []string { return v },
+			"icon":            icon,
+			"hasPrefix":       strings.HasPrefix,
+			"statusColor":     statusColor,
+			"statusWord":      statusWord,
+			"actionWord":      actionWord,
+			"add":             func(a, b int) int { return a + b },
+			"levelColor":      levelColor,
+			"providerName":    providerName,
+			"daysLeft":        func(exp int64) int { return daysLeft(s.now(), exp) },
+			"dict":            dict,
+			"pct":             func(a, b int) int { return a * 100 / max(b, 1) },
 		}
 		s.tpl = template.Must(template.New("").Funcs(funcs).ParseFS(assets, "templates/*.html"))
 		s.lim = newLimiter(10, 10*time.Minute)
@@ -447,7 +448,7 @@ func safe(s string) string {
 type nodeView struct {
 	N       *store.Node
 	T       trafficView // connection numbers the node reported
-	Status  string // ok | fail | ejected | paused | off | unknown
+	Status  string      // ok | fail | ejected | paused | off | unknown
 	Detail  string
 	Latency string
 	Checked time.Time     // when it was last probed
@@ -621,6 +622,7 @@ type clusterPageData struct {
 	Relays  []relayView
 	// RelayNames names each relay by id, for the nodes table.
 	RelayNames map[string]string
+	Lines      []lineView // the paths to the origin, as the nodes report them
 }
 
 func (s *Server) clusterPage(w http.ResponseWriter, r *http.Request, _ *auth.Session) {
@@ -638,7 +640,7 @@ func (s *Server) renderCluster(w http.ResponseWriter, r *http.Request, id, flash
 		flash = r.URL.Query().Get("ok")
 	}
 	data := clusterPageData{Row: s.clusterRow(st, c), Origin: s.originState(id), Latest: s.latestRelease(),
-		Relays: relayViews(st, id), RelayNames: map[string]string{}}
+		Relays: relayViews(st, id), RelayNames: map[string]string{}, Lines: s.clusterLines(st, c)}
 	for _, rl := range st.RelaysOf(id) {
 		data.RelayNames[rl.ID] = rl.Name
 	}

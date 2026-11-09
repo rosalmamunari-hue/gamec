@@ -141,6 +141,34 @@
   {{end}}
 </div>
 
+{{/* ---------------------------------------------------------------- lines to the origin */}}
+{{if .Data.Lines}}
+<div class="card mb-3" id="lines">
+  <div class="card-header">
+    <div>
+      <h3 class="card-title">源站线路</h3>
+      <div class="card-subtitle">节点到源站的路，按优先顺序。前一条连不上时节点自动改走下一条，恢复后自动切回。数字来自节点每分钟的上报。</div>
+    </div>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table">
+      <thead><tr><th>状态</th><th>线路</th><th>说明</th><th class="d-none d-md-table-cell text-end">经它的连接</th><th class="d-none d-md-table-cell text-end">失败次数</th></tr></thead>
+      <tbody>
+      {{range $i, $l := .Data.Lines}}
+      <tr>
+        <td>{{if eq $l.Status "ok"}}<span class="badge bg-green-lt">{{if eq $i 0}}主线路{{else}}备用{{end}} · 正常</span>{{else if eq $l.Status "partial"}}<span class="badge bg-yellow-lt">部分不通</span>{{else}}<span class="badge bg-red-lt">不通</span>{{end}}</td>
+        <td class="mono">{{$l.Addr}}</td>
+        <td class="small">{{if eq $l.Status "ok"}}<span class="text-secondary">{{$l.Nodes}} 个节点都连得上{{if not $l.LastFail.IsZero}}；上次失败 {{clock $l.LastFail}}{{end}}</span>{{else}}{{$l.Down}}/{{$l.Nodes}} 个节点连不上{{if not $l.DownFrom.IsZero}}，从 {{clock $l.DownFrom}} 开始{{end}}{{if $l.LastErr}}<div class="text-secondary">{{friendlyDialErr $l.LastErr}}</div>{{end}}{{end}}</td>
+        <td class="d-none d-md-table-cell text-end">{{$l.Used}}</td>
+        <td class="d-none d-md-table-cell text-end">{{$l.Fails}}</td>
+      </tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}
+
 {{/* ---------------------------------------------------------------- relays */}}
 {{if or .Data.Relays $p.Admin}}
 <div class="card mb-3" id="relays">

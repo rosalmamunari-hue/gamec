@@ -77,6 +77,7 @@ func (s *Server) alertConditions() []notify.Condition {
 		if c.AutoPublish && strings.HasPrefix(row.Note, "自动更新名单失败") {
 			cs = append(cs, notify.Condition{Key: c.ID + ":publish", Bad: true, After: 10 * time.Minute, Text: ch + row.Note})
 		}
+		cs = append(cs, s.lineConditions(st, c)...)
 		if s.originState(c.ID).Open {
 			cs = append(cs, notify.Condition{Key: c.ID + ":origin", Text: ch + "的源站 " + c.Origin + " 对公网开放，别人可以绕过节点直接打源站。"})
 		}
